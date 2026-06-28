@@ -126,12 +126,12 @@ export default function AccountButton({ compact = false }: { compact?: boolean }
                 今日生成额度
               </div>
               <div className="mt-2 text-2xl font-semibold text-amber-950">
-                {user?.quota.limit == null
+                {user?.quota?.limit == null
                   ? '无限制'
-                  : `${user?.quota.remaining ?? 0} / ${user?.quota.limit}`}
+                  : `${user?.quota?.remaining ?? 0} / ${user?.quota?.limit}`}
               </div>
-              {user?.quota.limit != null && (
-                <div className="mt-1 text-xs text-amber-800">已使用 {user?.quota.used ?? 0} 篇，北京时间每日重置</div>
+              {user?.quota?.limit != null && (
+                <div className="mt-1 text-xs text-amber-800">已使用 {user?.quota?.used ?? 0} 篇，北京时间每日重置</div>
               )}
             </div>
             <Button variant="outline" className="w-full" onClick={logout}>

@@ -31,7 +31,28 @@ export const useAuthStore = create<AuthState>()(
       setSession: (token, user) => set({ token, user }),
       clearSession: () => set({ token: null, user: null }),
     }),
-    { name: 'bilinote-auth' }
+    {
+      name: 'bilinote-auth',
+      version: 2,
+      migrate: (persisted: any) => {
+        if (!persisted?.user) return persisted
+        return {
+          ...persisted,
+          user: {
+            role: 'free',
+            role_label: '免费用户',
+            quota: {
+              limit: 5,
+              used: 0,
+              remaining: 5,
+              period: 'day',
+              period_key: '',
+            },
+            ...persisted.user,
+          },
+        }
+      },
+    }
   )
 )
 

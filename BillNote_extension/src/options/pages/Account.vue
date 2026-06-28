@@ -114,7 +114,7 @@ onMounted(async () => {
       <div class="rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
         <div class="font-medium">今日生成额度</div>
         <div class="mt-1 text-lg font-semibold">
-          {{ authSession.user?.quota.limit == null ? '无限制' : `${authSession.user?.quota.remaining} / ${authSession.user?.quota.limit}` }}
+          {{ authSession.user?.quota?.limit == null ? '无限制' : `${authSession.user?.quota?.remaining} / ${authSession.user?.quota?.limit}` }}
         </div>
       </div>
     </section>
