@@ -38,7 +38,20 @@ export default defineConfig(({ mode }) => {
     define: {
       __APP_VERSION__: JSON.stringify(appVersion),
     },
-    plugins: [react(), tailwindcss()],
+    plugins: [
+      react(),
+      tailwindcss(),
+      {
+        name: 'cloudflare-disable-rocket-loader',
+        enforce: 'post',
+        transformIndexHtml(html) {
+          return html.replace(
+            '<script type="module"',
+            '<script data-cfasync="false" type="module"'
+          )
+        },
+      },
+    ],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
