@@ -326,6 +326,7 @@ cython_debug/
 /BiliNote_frontend/src-tauri/bin/
 !BillNote_frontend/public/downloads/
 !BillNote_frontend/public/downloads/BiliNote-extension.zip
+!BillNote_frontend/public/downloads/BiliNote-extension-v2.zip
 
 # FFmpeg 构建文件（不应该提交到仓库）
 ffmpeg*/

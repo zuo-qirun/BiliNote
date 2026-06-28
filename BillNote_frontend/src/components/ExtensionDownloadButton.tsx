@@ -3,7 +3,7 @@ import { Download } from 'lucide-react'
 export default function ExtensionDownloadButton({ compact = false }: { compact?: boolean }) {
   return (
     <a
-      href="/downloads/BiliNote-extension.zip"
+      href="/downloads/BiliNote-extension-v2.zip"
       download
       title="下载 BiliNote 浏览器插件（MIT 开源）"
       aria-label="下载 BiliNote 浏览器插件"
