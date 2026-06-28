@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
-import { delete_task, generateNote } from '@/services/note.ts'
+import { generateNote } from '@/services/note.ts'
 import { v4 as uuidv4 } from 'uuid'
 import toast from 'react-hot-toast'
 import { get, set, del } from 'idb-keyval'
@@ -224,22 +224,27 @@ export const useTaskStore = create<TaskStore>()(
       removeTask: async id => {
         const task = get().tasks.find(t => t.id === id)
 
-        // 更新 Zustand 状态
+        if (!task) {
+          return
+        }
+
+        // 先删除云端副本，防止定时同步将刚删除的笔记重新拉回。
+        if (getAuthToken()) {
+          try {
+            await deleteSyncedTask(id)
+          }
+          catch (error) {
+            console.warn('Failed to delete synced task:', error)
+            toast.error('删除失败，请检查网络连接后重试')
+            return
+          }
+        }
+
         set(state => ({
-          tasks: state.tasks.filter(task => task.id !== id),
+          tasks: state.tasks.filter(item => item.id !== id),
           currentTaskId: state.currentTaskId === id ? null : state.currentTaskId,
         }))
-
-        // 调用后端删除接口（如果找到了任务）
-        if (task) {
-          await delete_task({
-            video_id: task.audioMeta.video_id,
-            platform: task.platform,
-          })
-        }
-        if (getAuthToken()) {
-          deleteSyncedTask(id).catch(() => undefined)
-        }
+        toast.success('笔记已删除')
       },
 
       clearTasks: () => set({ tasks: [], currentTaskId: null }),
@@ -251,7 +256,7 @@ export const useTaskStore = create<TaskStore>()(
           currentTaskId:
             state.currentTaskId && tasks.some(task => task.id === state.currentTaskId)
               ? state.currentTaskId
-              : tasks[0]?.id || null,
+              : null,
         })),
     }),
     {

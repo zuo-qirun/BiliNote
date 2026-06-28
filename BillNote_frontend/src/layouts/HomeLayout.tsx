@@ -38,6 +38,7 @@ const HomeLayout: FC<IProps> = ({ NoteForm, Preview, History }) => {
   const [isMobile, setIsMobile] = useState(false)
   const [mobileView, setMobileView] = useState<'form' | 'preview' | 'history'>('form')
   const currentTaskId = useTaskStore(state => state.currentTaskId)
+  const previousTaskIdRef = useRef(currentTaskId)
   const isAdmin = useAuthStore(state => state.user?.role === 'admin')
   const leftPanelRef = useRef<ImperativePanelHandle>(null)
   const middlePanelRef = useRef<ImperativePanelHandle>(null)
@@ -51,7 +52,10 @@ const HomeLayout: FC<IProps> = ({ NoteForm, Preview, History }) => {
   }, [])
 
   useEffect(() => {
-    if (isMobile && currentTaskId) {
+    const taskChanged = previousTaskIdRef.current !== currentTaskId
+    previousTaskIdRef.current = currentTaskId
+
+    if (isMobile && taskChanged && currentTaskId) {
       setMobileView('preview')
     }
   }, [currentTaskId, isMobile])

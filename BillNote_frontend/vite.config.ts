@@ -29,12 +29,17 @@ export default defineConfig(({ mode }) => {
   const apiBaseUrl = env.VITE_API_BASE_URL || 'http://127.0.0.1:8483'
   const port = parseInt(env.VITE_FRONTEND_PORT || '3015', 10)
   const appVersion = env.VITE_APP_VERSION || process.env.VITE_APP_VERSION || readAppVersion()
+  const isTauriBuild = Boolean(
+    process.env.TAURI_ENV_PLATFORM
+      || process.env.TAURI_PLATFORM
+      || process.env.TAURI_ENV_ARCH
+  )
 
   return {
     // Docker web deployments need root-relative assets so nested routes such as
     // /share/:id do not try to load scripts from /share/assets.
     // Keep the relative default for the Tauri desktop bundle.
-    base: process.env.VITE_PUBLIC_BASE || './',
+    base: process.env.VITE_PUBLIC_BASE || (isTauriBuild ? './' : '/'),
     define: {
       __APP_VERSION__: JSON.stringify(appVersion),
     },
@@ -58,6 +63,7 @@ export default defineConfig(({ mode }) => {
       },
     },
     build: {
+      assetsDir: env.VITE_ASSETS_DIR || 'assets-v2',
       rollupOptions: {
         output: {
           manualChunks: {
