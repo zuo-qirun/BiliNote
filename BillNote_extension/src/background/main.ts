@@ -1,6 +1,6 @@
 import { onMessage } from 'webext-bridge/background'
-import type { Settings, TaskRecord } from '~/logic/types'
-import { DEFAULT_SETTINGS, MAX_TASKS, SETTINGS_KEY, TASKS_KEY } from '~/logic/constants'
+import type { AuthSession, Settings, TaskRecord } from '~/logic/types'
+import { AUTH_KEY, DEFAULT_SETTINGS, MAX_TASKS, SETTINGS_KEY, TASKS_KEY } from '~/logic/constants'
 import { detectPlatform } from '~/logic/platform'
 import { fetchBilibiliSubtitle } from '~/logic/bilibili-subtitle'
 import { normalizeVideoTitle } from '~/logic/task-display'
@@ -41,6 +41,19 @@ async function readTasks(): Promise<TaskRecord[]> {
   }
 }
 
+async function readAuthToken(): Promise<string> {
+  const obj = await browser.storage.local.get(AUTH_KEY)
+  const raw = obj[AUTH_KEY] as string | undefined
+  if (!raw)
+    return ''
+  try {
+    return (JSON.parse(raw) as AuthSession).token || ''
+  }
+  catch {
+    return ''
+  }
+}
+
 async function writeTasks(tasks: TaskRecord[]) {
   await browser.storage.local.set({ [TASKS_KEY]: JSON.stringify(tasks.slice(0, MAX_TASKS)) })
 }
@@ -68,6 +81,7 @@ async function startTask(url: string, title?: string): Promise<{ ok: boolean, ta
     return { ok: false, error: '请先在设置页选择供应商与模型' }
 
   const backend = settings.backendUrl.replace(/\/$/, '')
+  const authToken = await readAuthToken()
 
   // B 站：先在浏览器里抓字幕（带本地登录态 cookie），随提交带过去
   const prefetched = platform === 'bilibili' ? await fetchBilibiliSubtitle(url) : null
@@ -76,7 +90,10 @@ async function startTask(url: string, title?: string): Promise<{ ok: boolean, ta
   try {
     const res = await fetch(`${backend}/api/generate_note`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+      },
       body: JSON.stringify({
         video_url: url,
         platform,
@@ -95,8 +112,16 @@ async function startTask(url: string, title?: string): Promise<{ ok: boolean, ta
         prefetched_transcript: prefetched ?? undefined,
       }),
     })
-    if (!res.ok)
-      return { ok: false, error: `HTTP ${res.status}` }
+    if (!res.ok) {
+      const raw = await res.text()
+      try {
+        const parsed = JSON.parse(raw) as { detail?: string, msg?: string }
+        return { ok: false, error: parsed.detail || parsed.msg || `HTTP ${res.status}` }
+      }
+      catch {
+        return { ok: false, error: raw || `HTTP ${res.status}` }
+      }
+    }
     const body = await res.json() as { code: number, msg: string, data: { task_id: string } }
     if (body.code !== 0)
       return { ok: false, error: body.msg }

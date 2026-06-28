@@ -1,6 +1,6 @@
 import { useWebExtensionStorage } from '~/composables/useWebExtensionStorage'
-import type { Settings, TaskRecord } from './types'
-import { DEFAULT_SETTINGS, MAX_TASKS, SETTINGS_KEY, TASKS_KEY } from './constants'
+import type { AuthSession, Settings, TaskRecord } from './types'
+import { AUTH_KEY, DEFAULT_SETTINGS, MAX_TASKS, SETTINGS_KEY, TASKS_KEY } from './constants'
 
 export { DEFAULT_BACKEND_URL, DEFAULT_SETTINGS, MAX_TASKS } from './constants'
 
@@ -15,6 +15,12 @@ export const { data: settings, dataReady: settingsReady } = useWebExtensionStora
 export const { data: tasks, dataReady: tasksReady } = useWebExtensionStorage<TaskRecord[]>(
   TASKS_KEY,
   [],
+)
+
+export const { data: authSession, dataReady: authReady } = useWebExtensionStorage<AuthSession>(
+  AUTH_KEY,
+  { token: '', user: null },
+  { mergeDefaults: true },
 )
 
 export function upsertTask(record: TaskRecord) {

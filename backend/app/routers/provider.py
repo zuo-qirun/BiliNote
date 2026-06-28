@@ -1,5 +1,5 @@
 from typing import Optional
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from app.exceptions.provider import ProviderError
@@ -7,6 +7,7 @@ from app.models.model_config import ModelConfig
 from app.services.model import ModelService
 from app.utils.response import ResponseWrapper as R
 from app.services.provider import ProviderService
+from app.services.account_access import require_admin
 
 router = APIRouter()
 
@@ -32,7 +33,7 @@ class ProviderUpdateRequest(BaseModel):
     enabled:Optional[int] = None
 
 @router.post("/add_provider")
-def add_provider(data: ProviderRequest):
+def add_provider(data: ProviderRequest, _admin: dict = Depends(require_admin)):
     try:
         res = ProviderService.add_provider(
             name=data.name,
@@ -71,7 +72,7 @@ def get_provider_by_id(id: str):
 
 
 @router.post("/update_provider")
-def update_provider(data: ProviderUpdateRequest):
+def update_provider(data: ProviderUpdateRequest, _admin: dict = Depends(require_admin)):
     try:
         if all(
             field is None
@@ -92,6 +93,6 @@ def update_provider(data: ProviderUpdateRequest):
         return R.error(msg=str(e))
 
 @router.post('/connect_test')
-def gpt_connect_test(data: TestRequest):
+def gpt_connect_test(data: TestRequest, _admin: dict = Depends(require_admin)):
     ModelService().connect_test(data.id, model=data.model)
     return R.success(msg='连接成功')

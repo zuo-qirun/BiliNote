@@ -21,3 +21,4 @@ export const MAX_TASKS = 30
 
 export const SETTINGS_KEY = 'bilinote-settings'
 export const TASKS_KEY = 'bilinote-tasks'
+export const AUTH_KEY = 'bilinote-auth'

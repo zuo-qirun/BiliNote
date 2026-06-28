@@ -1,12 +1,16 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import GeneralPage from './pages/General.vue'
 import ProvidersPage from './pages/Providers.vue'
 import TranscriberPage from './pages/Transcriber.vue'
 import DownloaderPage from './pages/Downloader.vue'
 import MonitorPage from './pages/Monitor.vue'
+import AccountPage from './pages/Account.vue'
+import { authReady, authSession } from '~/logic/storage'
+import { getCurrentAccount } from '~/logic/api'
 
 const TABS = [
+  { id: 'account', label: '账号与同步', icon: '☁', component: AccountPage },
   { id: 'general', label: '通用', icon: '⚙️', component: GeneralPage },
   { id: 'providers', label: '模型供应商', icon: '🧠', component: ProvidersPage },
   { id: 'transcriber', label: '音频转写配置', icon: '🎙️', component: TranscriberPage },
@@ -15,7 +19,24 @@ const TABS = [
 ] as const
 
 const activeTab = ref<typeof TABS[number]['id']>('general')
-const ActiveComponent = computed(() => TABS.find(t => t.id === activeTab.value)?.component ?? GeneralPage)
+const visibleTabs = computed(() => TABS.filter((tab) => {
+  if (!['providers', 'transcriber', 'downloader'].includes(tab.id))
+    return true
+  return authSession.value?.user?.role === 'admin'
+}))
+const ActiveComponent = computed(() => visibleTabs.value.find(t => t.id === activeTab.value)?.component ?? GeneralPage)
+
+onMounted(async () => {
+  await authReady
+  if (!authSession.value?.token)
+    return
+  try {
+    authSession.value = { ...authSession.value, user: await getCurrentAccount() }
+  }
+  catch {
+    authSession.value = { token: '', user: null }
+  }
+})
 </script>
 
 <template>
@@ -27,7 +48,7 @@ const ActiveComponent = computed(() => TABS.find(t => t.id === activeTab.value)?
       </div>
       <nav class="flex-1 overflow-auto py-2">
         <button
-          v-for="tab in TABS"
+          v-for="tab in visibleTabs"
           :key="tab.id"
           class="w-full text-left px-4 py-2 text-sm flex items-center gap-2 hover:bg-gray-100"
           :class="activeTab === tab.id ? 'bg-blue-50 text-blue-700 font-medium border-l-2 border-blue-500' : 'text-gray-700'"

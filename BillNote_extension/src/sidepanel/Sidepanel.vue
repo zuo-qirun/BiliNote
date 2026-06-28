@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { getTaskStatus, resolveImageUrl } from '~/logic/api'
-import { tasks, tasksReady, settingsReady, upsertTask } from '~/logic/storage'
+import { authReady, authSession, tasks, tasksReady, settingsReady, upsertTask } from '~/logic/storage'
+import { scheduleTaskSync, syncTaskHistory } from '~/logic/account-sync'
 import type { TaskRecord } from '~/logic/types'
 import { getTaskDisplayTitle } from '~/logic/task-display'
 
@@ -32,6 +33,7 @@ const STAGE_LABELS: Record<string, string> = {
 }
 
 let pollTimer: ReturnType<typeof setTimeout> | null = null
+let accountSyncTimer: ReturnType<typeof setInterval> | null = null
 
 async function poll(taskId: string) {
   try {
@@ -46,6 +48,7 @@ async function poll(taskId: string) {
         updatedAt: Date.now(),
         title: cur.title || getTaskDisplayTitle(cur),
       })
+      scheduleTaskSync()
     }
     if (res.status !== 'SUCCESS' && res.status !== 'FAILED')
       pollTimer = setTimeout(() => poll(taskId), 3000)
@@ -143,18 +146,22 @@ const activeCover = computed(() =>
   (activeTask.value?.result?.audio_meta as { cover_url?: string } | undefined)?.cover_url)
 
 onMounted(async () => {
-  await Promise.all([settingsReady, tasksReady])
+  await Promise.all([settingsReady, tasksReady, authReady])
+  await syncTaskHistory().catch(() => undefined)
   const latest = tasks.value?.[0]
   if (latest) {
     activeTaskId.value = latest.taskId
     if (latest.status !== 'SUCCESS' && latest.status !== 'FAILED')
       poll(latest.taskId)
   }
+  accountSyncTimer = setInterval(() => syncTaskHistory().catch(() => undefined), 30_000)
 })
 
 onUnmounted(() => {
   if (pollTimer)
     clearTimeout(pollTimer)
+  if (accountSyncTimer)
+    clearInterval(accountSyncTimer)
 })
 </script>
 
@@ -162,7 +169,12 @@ onUnmounted(() => {
   <main class="w-full h-full flex flex-col bg-white text-sm text-gray-800">
     <!-- 顶栏：极简 -->
     <header class="flex items-center justify-between px-3 py-2 border-b shrink-0">
-      <div class="font-semibold">BiliNote</div>
+      <div class="flex items-center gap-2">
+        <div class="font-semibold">BiliNote</div>
+        <span v-if="authSession.token" class="rounded-full bg-green-50 px-2 py-0.5 text-[10px] text-green-700">
+          {{ authSession.user?.username }}
+        </span>
+      </div>
       <div class="flex items-center gap-1">
         <button
           v-if="(tasks?.length ?? 0) > 0"

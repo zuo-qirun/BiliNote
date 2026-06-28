@@ -1,5 +1,8 @@
 import type {
   DeployStatus,
+  AccountUser,
+  AuthSession,
+  CloudTask,
   GenerateRequest,
   Model,
   Provider,
@@ -11,7 +14,7 @@ import type {
   TranscriberType,
   WhisperModelSize,
 } from './types'
-import { settings } from './storage'
+import { authSession, settings } from './storage'
 
 interface ApiEnvelope<T> {
   code: number
@@ -24,12 +27,23 @@ function backendUrl(): string {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const authHeaders: Record<string, string> = {}
+  if (authSession.value?.token)
+    authHeaders.Authorization = `Bearer ${authSession.value.token}`
   const res = await fetch(`${backendUrl()}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
     ...init,
+    headers: { 'Content-Type': 'application/json', ...authHeaders, ...(init?.headers || {}) },
   })
-  if (!res.ok)
-    throw new Error(`HTTP ${res.status}: ${await res.text()}`)
+  if (!res.ok) {
+    const raw = await res.text()
+    let message = raw
+    try {
+      const error = JSON.parse(raw) as { detail?: string, msg?: string }
+      message = error.detail || error.msg || raw
+    }
+    catch {}
+    throw new Error(message || `请求失败（HTTP ${res.status}）`)
+  }
   const body = (await res.json()) as ApiEnvelope<T> | T
   // 后端 ResponseWrapper 包了 {code, msg, data}；非 0 视为业务错
   if (body && typeof body === 'object' && 'code' in body) {
@@ -39,6 +53,61 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     return env.data
   }
   return body as T
+}
+
+export interface CaptchaResult {
+  captcha_id: string
+  image: string
+  expires_in: number
+}
+
+export async function getCaptcha(): Promise<CaptchaResult> {
+  return request<CaptchaResult>('/api/auth/captcha')
+}
+
+export async function registerAccount(data: {
+  username: string
+  password: string
+  email: string
+  phone?: string
+  captcha_id: string
+  captcha_code: string
+}): Promise<AuthSession> {
+  return request<AuthSession>('/api/auth/register', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function loginAccount(username: string, password: string): Promise<AuthSession> {
+  return request<AuthSession>('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  })
+}
+
+export async function logoutAccount(): Promise<void> {
+  await request('/api/auth/logout', { method: 'POST' })
+}
+
+export async function getCurrentAccount(): Promise<AccountUser> {
+  return request<AccountUser>('/api/auth/me')
+}
+
+export async function getSyncedTasks(): Promise<CloudTask[]> {
+  const result = await request<{ tasks: CloudTask[] }>('/api/sync/tasks')
+  return result.tasks
+}
+
+export async function putSyncedTasks(tasks: CloudTask[]): Promise<void> {
+  await request('/api/sync/tasks', {
+    method: 'POST',
+    body: JSON.stringify({ tasks }),
+  })
+}
+
+export async function deleteSyncedTask(taskId: string): Promise<void> {
+  await request(`/api/sync/tasks/${encodeURIComponent(taskId)}`, { method: 'DELETE' })
 }
 
 export async function getProviders(): Promise<Provider[]> {

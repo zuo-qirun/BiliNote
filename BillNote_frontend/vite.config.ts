@@ -31,7 +31,10 @@ export default defineConfig(({ mode }) => {
   const appVersion = env.VITE_APP_VERSION || process.env.VITE_APP_VERSION || readAppVersion()
 
   return {
-    base: './',
+    // Docker web deployments need root-relative assets so nested routes such as
+    // /share/:id do not try to load scripts from /share/assets.
+    // Keep the relative default for the Tauri desktop bundle.
+    base: process.env.VITE_PUBLIC_BASE || './',
     define: {
       __APP_VERSION__: JSON.stringify(appVersion),
     },

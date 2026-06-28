@@ -4,6 +4,7 @@ import {
   HardDriveDownload,
   Info,
   Activity,
+  UsersRound,
 } from 'lucide-react'
 import MenuBar, { IMenuProps } from '@/pages/SettingPage/components/menuBar.tsx'
 
@@ -34,6 +35,12 @@ const Menu = () => {
     //   icon: <SquareChevronRight />,
     //   path: '/settings/prompt',
     // },
+    {
+      id: 'users',
+      name: '用户与权限',
+      icon: <UsersRound />,
+      path: '/settings/users',
+    },
     {
       id: 'monitor',
       name: '部署监控',

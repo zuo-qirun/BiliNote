@@ -1,8 +1,9 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from app.services.model import ModelService
 from app.utils.response import ResponseWrapper as R
+from app.services.account_access import require_admin
 router = APIRouter()
 modelService = ModelService()
 class CreateModelRequest(BaseModel):
@@ -20,7 +21,7 @@ def model_list():
     except Exception as e:
         return R.error(e)
 @router.get("/models/delete/{model_id}")
-def delete_model(model_id: int):
+def delete_model(model_id: int, _admin: dict = Depends(require_admin)):
     try:
         success = modelService.delete_model_by_id(model_id)
         if success:
@@ -36,7 +37,7 @@ def model_list(provider_id):
 
 
 @router.post("/models")
-def create_model(data: CreateModelRequest):
+def create_model(data: CreateModelRequest, _admin: dict = Depends(require_admin)):
     success = ModelService.add_new_model(data.provider_id, data.model_name)
     if not success:
         return R.error("模型添加失败")

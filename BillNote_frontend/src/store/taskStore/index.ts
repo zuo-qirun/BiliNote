@@ -4,9 +4,22 @@ import { delete_task, generateNote } from '@/services/note.ts'
 import { v4 as uuidv4 } from 'uuid'
 import toast from 'react-hot-toast'
 import { get, set, del } from 'idb-keyval'
+import { deleteSyncedTask } from '@/services/account'
+import { getAuthToken } from '@/store/authStore'
 
 
-export type TaskStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILD'
+export type TaskStatus =
+  | 'PENDING'
+  | 'RUNNING'
+  | 'PARSING'
+  | 'DOWNLOADING'
+  | 'TRANSCRIBING'
+  | 'SUMMARIZING'
+  | 'FORMATTING'
+  | 'SAVING'
+  | 'SUCCESS'
+  | 'FAILED'
+  | 'FAILD'
 
 export interface AudioMeta {
   cover_url: string
@@ -45,6 +58,7 @@ export interface Task {
   status: TaskStatus
   audioMeta: AudioMeta
   createdAt: string
+  updatedAt?: string
   formData: {
     video_url: string
     link: undefined | boolean
@@ -59,13 +73,14 @@ export interface Task {
 interface TaskStore {
   tasks: Task[]
   currentTaskId: string | null
-  addPendingTask: (taskId: string, platform: string) => void
+  addPendingTask: (taskId: string, platform: string, formData: any) => void
   updateTaskContent: (id: string, data: Partial<Omit<Task, 'id' | 'createdAt'>>) => void
   removeTask: (id: string) => void
   clearTasks: () => void
   setCurrentTask: (taskId: string | null) => void
   getCurrentTask: () => Task | null
   retryTask: (id: string) => void
+  replaceTasks: (tasks: Task[]) => void
 }
 
 export const useTaskStore = create<TaskStore>()(
@@ -91,6 +106,7 @@ export const useTaskStore = create<TaskStore>()(
                 segments: [],
               },
               createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
               audioMeta: {
                 cover_url: '',
                 duration: 0,
@@ -146,10 +162,11 @@ export const useTaskStore = create<TaskStore>()(
                   ...task,
                   ...data,
                   markdown: updatedMarkdown,
+                  updatedAt: new Date().toISOString(),
                 }
               }
 
-              return { ...task, ...data }
+              return { ...task, ...data, updatedAt: new Date().toISOString() }
             }),
           })),
 
@@ -196,6 +213,7 @@ export const useTaskStore = create<TaskStore>()(
                     ...t,
                     formData: newFormData, // ✅ 显式更新 formData
                     status: 'PENDING',
+                    updatedAt: new Date().toISOString(),
                   }
                   : t
           ),
@@ -219,11 +237,22 @@ export const useTaskStore = create<TaskStore>()(
             platform: task.platform,
           })
         }
+        if (getAuthToken()) {
+          deleteSyncedTask(id).catch(() => undefined)
+        }
       },
 
       clearTasks: () => set({ tasks: [], currentTaskId: null }),
 
       setCurrentTask: taskId => set({ currentTaskId: taskId }),
+      replaceTasks: tasks =>
+        set(state => ({
+          tasks,
+          currentTaskId:
+            state.currentTaskId && tasks.some(task => task.id === state.currentTaskId)
+              ? state.currentTaskId
+              : tasks[0]?.id || null,
+        })),
     }),
     {
       name: 'task-storage',

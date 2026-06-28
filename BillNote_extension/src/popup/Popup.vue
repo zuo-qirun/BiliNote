@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { detectPlatform } from '~/logic/platform'
-import { settings, settingsReady, tasks, tasksReady, upsertTask } from '~/logic/storage'
+import { authReady, authSession, settings, settingsReady, tasks, tasksReady, upsertTask } from '~/logic/storage'
 import { generateNote, getTaskStatus, resolveImageUrl } from '~/logic/api'
+import { scheduleTaskSync, syncTaskHistory } from '~/logic/account-sync'
 import { fetchBilibiliSubtitle } from '~/logic/bilibili-subtitle'
 import { NOTE_FORMATS, NOTE_STYLES, type NoteFormat, type TaskRecord } from '~/logic/types'
 import { getTaskDisplayTitle, normalizeVideoTitle } from '~/logic/task-display'
@@ -19,6 +20,7 @@ const activeTaskId = ref<string>('')
 const activeTask = computed<TaskRecord | undefined>(() => tasks.value?.find(t => t.taskId === activeTaskId.value))
 
 let pollTimer: ReturnType<typeof setTimeout> | null = null
+let accountSyncTimer: ReturnType<typeof setInterval> | null = null
 
 async function loadActiveTab() {
   try {
@@ -46,6 +48,7 @@ async function poll(taskId: string) {
       result: res.result ?? activeTask.value?.result,
       title: activeTask.value?.title || normalizeVideoTitle(tabTitle.value),
     })
+    scheduleTaskSync()
     if (res.status !== 'SUCCESS' && res.status !== 'FAILED')
       pollTimer = setTimeout(() => poll(taskId), 3000)
   }
@@ -98,6 +101,7 @@ async function start() {
       updatedAt: Date.now(),
       title: normalizeVideoTitle(tabTitle.value),
     })
+    scheduleTaskSync()
     poll(task_id)
     // 提交后顺手把侧边栏拉起来，免得用户来回切窗口
     openSidePanel()
@@ -155,18 +159,22 @@ function fmtTime(ts?: number) {
 }
 
 onMounted(async () => {
-  await Promise.all([settingsReady, tasksReady])
+  await Promise.all([settingsReady, tasksReady, authReady])
+  await syncTaskHistory().catch(() => undefined)
   await loadActiveTab()
   const running = tasks.value?.find(t => t.status !== 'SUCCESS' && t.status !== 'FAILED')
   if (running) {
     activeTaskId.value = running.taskId
     poll(running.taskId)
   }
+  accountSyncTimer = setInterval(() => syncTaskHistory().catch(() => undefined), 30_000)
 })
 
 onUnmounted(() => {
   if (pollTimer)
     clearTimeout(pollTimer)
+  if (accountSyncTimer)
+    clearInterval(accountSyncTimer)
 })
 </script>
 
@@ -177,7 +185,12 @@ onUnmounted(() => {
         <span class="font-semibold text-base">BiliNote</span>
         <PlatformBadge :platform="platform" />
       </div>
-      <button class="text-xs text-gray-500 hover:text-gray-800" @click="openOptions">设置</button>
+      <div class="flex items-center gap-2">
+        <button class="text-xs text-gray-500 hover:text-blue-700" @click="openOptions">
+          {{ authSession.token ? authSession.user?.username : '登录' }}
+        </button>
+        <button class="text-xs text-gray-500 hover:text-gray-800" @click="openOptions">设置</button>
+      </div>
     </header>
 
     <div class="text-xs text-gray-500 truncate" :title="normalizeVideoTitle(tabTitle) || tabUrl">

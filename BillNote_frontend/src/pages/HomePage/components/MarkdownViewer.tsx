@@ -25,6 +25,7 @@ import TranscriptViewer from '@/pages/HomePage/components/transcriptViewer.tsx'
 import MarkmapEditor from '@/pages/HomePage/components/MarkmapComponent.tsx'
 import ChatPanel from '@/pages/HomePage/components/ChatPanel.tsx'
 import VideoBanner from '@/pages/HomePage/components/VideoBanner.tsx'
+import { shareNote } from '@/services/note.ts'
 
 interface VersionNote {
   ver_id: string
@@ -50,6 +51,34 @@ const steps = [
 const remarkPlugins = [gfm, remarkMath]
 const rehypePlugins = [rehypeKatex, rehypeSlug]
 
+function renderScreenshotMarkers(content: string, videoId: string) {
+  if (!content || !videoId || !content.includes('Screenshot-')) return content
+
+  return content.replace(
+    /\*?Screenshot-(?:\[(\d{2}):(\d{2})\]|(\d{2}):(\d{2}))\*?/g,
+    (_marker, bracketMinutes, bracketSeconds, plainMinutes, plainSeconds) => {
+      const minutes = Number(bracketMinutes ?? plainMinutes)
+      const seconds = Number(bracketSeconds ?? plainSeconds)
+      const timestamp = minutes * 60 + seconds
+      const query = new URLSearchParams({
+        video_id: videoId,
+        timestamp: String(timestamp),
+      })
+      return `![](/api/screenshot_frame?${query.toString()})`
+    }
+  )
+}
+
+function makePortableMarkdown(content: string) {
+  if (!content || typeof window === 'undefined') return content
+
+  const origin = window.location.origin
+  return content.replace(
+    /(!?\[[^\]]*\]\()((?:\/(?!\/))[^)\s]+)(?=\))/g,
+    (_match, prefix, resourcePath) => `${prefix}${origin}${resourcePath}`
+  )
+}
+
 /**
  * 构建 ReactMarkdown components 对象，baseURL 用于修正图片路径。
  * 使用函数 + useMemo 避免每次渲染都创建新的函数实例。
@@ -58,7 +87,7 @@ function createMarkdownComponents(baseURL: string) {
   return {
     h1: ({ children, ...props }: any) => (
       <h1
-        className="text-primary my-6 scroll-m-20 text-3xl font-extrabold tracking-tight lg:text-4xl"
+        className="text-primary my-5 scroll-m-20 text-2xl font-extrabold tracking-tight sm:my-6 sm:text-3xl lg:text-4xl"
         {...props}
       >
         {children}
@@ -66,7 +95,7 @@ function createMarkdownComponents(baseURL: string) {
     ),
     h2: ({ children, ...props }: any) => (
       <h2
-        className="text-primary mt-10 mb-4 scroll-m-20 border-b pb-2 text-2xl font-semibold tracking-tight first:mt-0"
+        className="text-primary mt-8 mb-3 scroll-m-20 border-b pb-2 text-xl font-semibold tracking-tight first:mt-0 sm:mt-10 sm:mb-4 sm:text-2xl"
         {...props}
       >
         {children}
@@ -89,7 +118,7 @@ function createMarkdownComponents(baseURL: string) {
       </h4>
     ),
     p: ({ children, ...props }: any) => (
-      <p className="leading-7 [&:not(:first-child)]:mt-6" {...props}>
+      <p className="text-[15px] leading-7 sm:text-base [&:not(:first-child)]:mt-5 sm:[&:not(:first-child)]:mt-6" {...props}>
         {children}
       </p>
     ),
@@ -325,10 +354,23 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   const getCurrentTask = useTaskStore.getState().getCurrentTask
   const currentTask = useTaskStore(state => state.getCurrentTask())
   const taskStatus = currentTask?.status || 'PENDING'
+  const screenshotVideoId =
+    currentTask?.audioMeta?.video_id ||
+    currentTask?.formData?.video_url?.match(/BV[A-Za-z0-9]+/)?.[0] ||
+    ''
+  const renderedContent = useMemo(
+    () => renderScreenshotMarkers(selectedContent, screenshotVideoId),
+    [selectedContent, screenshotVideoId]
+  )
+  const portableContent = useMemo(
+    () => makePortableMarkdown(renderedContent),
+    [renderedContent]
+  )
   const retryTask = useTaskStore.getState().retryTask
   const isMultiVersion = Array.isArray(currentTask?.markdown)
   const [showTranscribe, setShowTranscribe] = useState(false)
   const [showChat, setShowChat] = useState<false | 'half' | 'full'>(false)
+  const [sharing, setSharing] = useState(false)
   const [viewMode, setViewMode] = useState<'map' | 'preview'>('preview')
   const svgRef = useRef<SVGSVGElement>(null)
 
@@ -368,7 +410,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   }, [currentVerId, currentTask?.id])
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(selectedContent)
+      await navigator.clipboard.writeText(portableContent)
       setCopied(true)
       toast.success('已复制到剪贴板')
       setTimeout(() => setCopied(false), 2000)
@@ -406,18 +448,43 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   const handleDownload = () => {
     const task = getCurrentTask()
     const name = task?.audioMeta.title || 'note'
-    const blob = new Blob([selectedContent], { type: 'text/markdown;charset=utf-8' })
+    const blob = new Blob(['\uFEFF', portableContent], { type: 'text/markdown;charset=utf-8' })
     const link = document.createElement('a')
     link.href = URL.createObjectURL(blob)
     link.download = `${name}.md`
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
+    URL.revokeObjectURL(link.href)
+  }
+
+  const handleShare = async () => {
+    if (!currentTask || !portableContent.trim() || sharing) return
+
+    setSharing(true)
+    try {
+      const result = await shareNote({
+        markdown: portableContent,
+        title: currentTask.audioMeta?.title || 'BiliNote 分享笔记',
+        task_id: currentTask.id,
+        video_url: currentTask.formData?.video_url,
+        platform: currentTask.audioMeta?.platform || currentTask.formData?.platform,
+        author: currentTask.audioMeta?.raw_info?.uploader,
+      })
+      const shareUrl = new URL(result.path, window.location.origin).toString()
+      await navigator.clipboard.writeText(shareUrl)
+      toast.success('分享链接已复制')
+    } catch (error) {
+      console.error('创建分享链接失败', error)
+      toast.error('创建分享链接失败')
+    } finally {
+      setSharing(false)
+    }
   }
 
   if (status === 'loading') {
     return (
-      <div className="flex h-screen w-full flex-col items-center justify-center space-y-4 text-neutral-500">
+      <div className="flex h-full w-full flex-col items-center justify-center space-y-4 px-4 text-neutral-500">
         <StepBar steps={steps} currentStep={taskStatus} />
         <Loading className="h-5 w-5" />
         <div className="text-center text-sm">
@@ -430,7 +497,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
 
   if (status === 'idle') {
     return (
-      <div className="flex h-screen w-full flex-col items-center justify-center space-y-3 text-neutral-500">
+      <div className="flex h-full w-full flex-col items-center justify-center space-y-3 px-4 text-neutral-500">
         <Idle />
         <div className="text-center">
           <p className="text-lg font-bold">输入视频链接并点击"生成笔记"</p>
@@ -442,7 +509,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
 
   if (status === 'failed' && !isMultiVersion) {
     return (
-      <div className="flex h-screen w-full flex-col items-center justify-center gap-4 space-y-3">
+      <div className="flex h-full w-full flex-col items-center justify-center gap-4 space-y-3 px-4">
         <Error />
         <div className="text-center">
           <p className="text-lg font-bold text-red-500">笔记生成失败</p>
@@ -457,7 +524,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   }
 
   return (
-    <div className="flex h-screen w-full flex-col overflow-hidden">
+    <div className="flex h-full min-h-0 w-full flex-col overflow-hidden">
       <MarkdownHeader
         currentTask={currentTask}
         isMultiVersion={isMultiVersion}
@@ -468,6 +535,8 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
         noteStyles={noteStyles}
         onCopy={handleCopy}
         onDownload={handleDownload}
+        onShare={handleShare}
+        sharing={sharing}
         createAt={createTime}
         showTranscribe={showTranscribe}
         setShowTranscribe={setShowTranscribe}
@@ -481,7 +550,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
         <div className="flex w-full flex-1 overflow-hidden bg-white">
           <div className={'w-full'}>
             <MarkmapEditor
-              value={selectedContent}
+              value={renderedContent}
               onChange={() => {}}
               height="100%" // 根据需求可以设定百分比或固定高度
               title={currentTask?.audioMeta?.title || '思维导图'}
@@ -489,7 +558,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
           </div>
         </div>
       ) : (
-        <div className="flex flex-1 overflow-hidden bg-white py-2">
+        <div className="relative flex min-h-0 flex-1 overflow-hidden bg-white py-2">
           {selectedContent && selectedContent !== 'loading' && selectedContent !== 'empty' ? (
             <>
               {showChat === 'full' && currentTask ? (
@@ -498,31 +567,31 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
                 </div>
               ) : (
               <>
-              <ScrollArea className="min-w-0 flex-1">
+              <ScrollArea className={showChat === 'half' ? 'hidden min-w-0 flex-1 sm:block' : 'min-w-0 flex-1'}>
                 <div className="px-2">
                   <VideoBanner
                     audioMeta={currentTask?.audioMeta}
                     videoUrl={currentTask?.formData?.video_url}
                   />
                 </div>
-                <div className={'markdown-body w-full px-2'}>
+                <div className={'markdown-body mx-auto w-full max-w-5xl px-3 pb-8 sm:px-5'}>
                   <ReactMarkdown
                     remarkPlugins={remarkPlugins}
                     rehypePlugins={rehypePlugins}
                     components={markdownComponents}
                   >
-                    {selectedContent.replace(/^>\s*来源链接：[^\n]*\n*/m, '')}
+                    {renderedContent.replace(/^>\s*来源链接：[^\n]*\n*/m, '')}
                   </ReactMarkdown>
                 </div>
               </ScrollArea>
               {showTranscribe && (
-                <div className={'ml-2 w-2/4'}>
+                <div className="absolute inset-0 z-20 bg-white sm:static sm:ml-2 sm:w-2/4">
                   <TranscriptViewer />
                 </div>
               )}
               {/* 侧边问答模式：markdown + ChatPanel 各占一半 */}
               {showChat === 'half' && currentTask && (
-                <div className="ml-2 h-full w-1/2 shrink-0">
+                <div className="h-full w-full shrink-0 sm:ml-2 sm:w-1/2">
                   <ChatPanel taskId={currentTask.id} mode="half" onModeChange={setShowChat} />
                 </div>
               )}

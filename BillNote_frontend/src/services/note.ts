@@ -1,6 +1,31 @@
 import request from '@/utils/request'
 import toast from 'react-hot-toast'
 
+export interface ShareNotePayload {
+  markdown: string
+  title?: string
+  task_id?: string
+  video_url?: string
+  platform?: string
+  author?: string
+}
+
+export interface SharedNote extends ShareNotePayload {
+  share_id: string
+  created_at: string
+}
+
+export interface ShareNoteResult {
+  share_id: string
+  path: string
+}
+
+export const shareNote = (data: ShareNotePayload) =>
+  request.post<any, ShareNoteResult>('/share_note', data)
+
+export const getSharedNote = (shareId: string) =>
+  request.get<any, SharedNote>(`/shared_note/${encodeURIComponent(shareId)}`)
+
 export const generateNote = async (data: {
   video_url: string
   platform: string

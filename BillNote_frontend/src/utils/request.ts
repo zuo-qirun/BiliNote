@@ -1,5 +1,6 @@
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
 import toast from 'react-hot-toast'
+import { getAuthToken } from '@/store/authStore'
 
 // 统一响应类型
 export interface IResponse<T = any> {
@@ -26,6 +27,14 @@ const baseURL = import.meta.env.VITE_API_BASE_URL;
   baseURL: baseURL || '/api',
   timeout: 10000,
 });
+
+request.interceptors.request.use(config => {
+  const token = getAuthToken()
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
 
 // 响应拦截器
 request.interceptors.response.use(

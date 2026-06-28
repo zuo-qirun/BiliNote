@@ -83,6 +83,39 @@ export interface TaskRecord {
   title?: string
 }
 
+export interface AccountUser {
+  username: string
+  email?: string | null
+  phone?: string | null
+  role: 'free' | 'privileged' | 'admin'
+  role_label: string
+  quota: {
+    limit: number | null
+    used: number
+    remaining: number | null
+    period: 'day' | 'lifetime'
+    period_key: string
+  }
+}
+
+export interface AuthSession {
+  token: string
+  user: AccountUser | null
+}
+
+export interface CloudTask {
+  task_id: string
+  video_url: string
+  platform: string
+  status: string
+  message?: string
+  title?: string
+  created_at: number
+  updated_at: number
+  result?: NoteResult
+  form_data?: Record<string, unknown>
+}
+
 // 与 backend/app/gpt/prompt_builder.py note_styles 一一对齐
 export type NoteStyle =
   | 'minimal' | 'detailed' | 'academic' | 'tutorial'

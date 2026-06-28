@@ -2,7 +2,7 @@ import os
 import platform
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from pydantic import BaseModel
 from typing import Optional
 from app.utils.response import ResponseWrapper as R
@@ -13,6 +13,7 @@ from app.services.cookie_manager import CookieConfigManager
 from app.services.transcriber_config_manager import TranscriberConfigManager
 from app.transcriber import model_download_state as dl_state
 from ffmpeg_helper import ensure_ffmpeg_or_raise
+from app.services.account_access import require_admin
 
 logger = get_logger(__name__)
 
@@ -27,7 +28,7 @@ class CookieUpdateRequest(BaseModel):
 
 
 @router.get("/get_downloader_cookie/{platform}")
-def get_cookie(platform: str):
+def get_cookie(platform: str, _admin: dict = Depends(require_admin)):
     cookie = cookie_manager.get(platform)
     if not cookie:
         return R.success(msg='未找到Cookies')
@@ -37,7 +38,7 @@ def get_cookie(platform: str):
 
 
 @router.post("/update_downloader_cookie")
-def update_cookie(data: CookieUpdateRequest):
+def update_cookie(data: CookieUpdateRequest, _admin: dict = Depends(require_admin)):
     cookie_manager.set(data.platform, data.cookie)
     return R.success(
 
@@ -91,7 +92,7 @@ def list_whisper_models():
 
 
 @router.post("/whisper_models")
-def add_whisper_model(data: WhisperCustomModelRequest):
+def add_whisper_model(data: WhisperCustomModelRequest, _admin: dict = Depends(require_admin)):
     """新增自定义 whisper 模型映射（名称 → HF repo_id 或本地路径）。"""
     from app.transcriber.whisper_models import get_registry
     try:
@@ -102,7 +103,7 @@ def add_whisper_model(data: WhisperCustomModelRequest):
 
 
 @router.delete("/whisper_models/{name}")
-def delete_whisper_model(name: str):
+def delete_whisper_model(name: str, _admin: dict = Depends(require_admin)):
     """删除自定义 whisper 模型映射（不会删除已下载的模型文件）。"""
     from app.transcriber.whisper_models import get_registry
     custom = get_registry().remove_custom_model(name)
@@ -110,7 +111,7 @@ def delete_whisper_model(name: str):
 
 
 @router.post("/transcriber_config")
-def update_transcriber_config(data: TranscriberConfigRequest):
+def update_transcriber_config(data: TranscriberConfigRequest, _admin: dict = Depends(require_admin)):
     config = transcriber_config_manager.update_config(
         transcriber_type=data.transcriber_type,
         whisper_model_size=data.whisper_model_size,
@@ -126,7 +127,7 @@ class ProxyConfigRequest(BaseModel):
 
 
 @router.get("/proxy_config")
-def get_proxy_config():
+def get_proxy_config(_admin: dict = Depends(require_admin)):
     from app.services.proxy_config_manager import ProxyConfigManager
     mgr = ProxyConfigManager()
     cfg = mgr.get_config()
@@ -138,7 +139,7 @@ def get_proxy_config():
 
 
 @router.post("/proxy_config")
-def update_proxy_config(data: ProxyConfigRequest):
+def update_proxy_config(data: ProxyConfigRequest, _admin: dict = Depends(require_admin)):
     from app.services.proxy_config_manager import ProxyConfigManager
     mgr = ProxyConfigManager()
     cfg = mgr.update_config(enabled=data.enabled, url=data.url)
@@ -324,7 +325,11 @@ def _do_download_mlx_whisper(model_size: str):
 
 
 @router.post("/transcriber_download")
-def download_transcriber_model(data: ModelDownloadRequest, background_tasks: BackgroundTasks):
+def download_transcriber_model(
+    data: ModelDownloadRequest,
+    background_tasks: BackgroundTasks,
+    _admin: dict = Depends(require_admin),
+):
     """触发后台下载指定的 whisper 模型（fast-whisper 支持内置档位 + 自定义模型）。"""
     if data.transcriber_type == "mlx-whisper":
         # mlx 只认内置档位（mlx-community 的固定映射）
