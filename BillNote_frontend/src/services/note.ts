@@ -45,24 +45,15 @@ export const generateNote = async (data: {
     const response = await request.post('/generate_note', data)
 
     if (!response) {
-      if (response.data.msg) {
-        toast.error(response.data.msg)
-      }
+      toast.error('笔记生成任务提交失败')
       return null
     }
-    toast.success('笔记生成任务已提交！')
 
-    console.log('res', response)
-    // 成功提示
-
+    toast.success('笔记生成任务已提交')
     return response
   } catch (e: any) {
-    console.error('❌ 请求出错', e)
-
-    // 错误提示
-    // toast.error('笔记生成失败，请稍后重试')
-
-    throw e // 抛出错误以便调用方处理
+    console.error('请求出错', e)
+    throw e
   }
 }
 
@@ -73,28 +64,20 @@ export const delete_task = async ({ video_id, platform }) => {
       platform,
     }
     const res = await request.post('/delete_task', data)
-
-
-      toast.success('任务已成功删除')
-      return res
+    toast.success('任务已成功删除')
+    return res
   } catch (e) {
     toast.error('请求异常，删除任务失败')
-    console.error('❌ 删除任务失败:', e)
+    console.error('删除任务失败:', e)
     throw e
   }
 }
 
 export const get_task_status = async (task_id: string) => {
   try {
-    // 成功提示
-
-    return await request.get('/task_status/' + task_id)
+    return await request.get('/task_status/' + task_id, { suppressToast: true })
   } catch (e) {
-    console.error('❌ 请求出错', e)
-
-    // 错误提示
-    toast.error('笔记生成失败，请稍后重试')
-
-    throw e // 抛出错误以便调用方处理
+    console.error('轮询任务状态失败', e)
+    throw e
   }
 }

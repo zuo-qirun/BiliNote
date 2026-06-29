@@ -7,7 +7,6 @@ import { get, set, del } from 'idb-keyval'
 import { deleteSyncedTask } from '@/services/account'
 import { getAuthToken } from '@/store/authStore'
 
-
 export type TaskStatus =
   | 'PENDING'
   | 'RUNNING'
@@ -43,6 +42,7 @@ export interface Transcript {
   raw: any
   segments: Segment[]
 }
+
 export interface Markdown {
   ver_id: string
   content: string
@@ -53,12 +53,14 @@ export interface Markdown {
 
 export interface Task {
   id: string
-  markdown: string|Markdown [] //为了兼容之前的笔记
+  markdown: string | Markdown[]
+  liveMarkdown?: string
   transcript: Transcript
   status: TaskStatus
   audioMeta: AudioMeta
   createdAt: string
   updatedAt?: string
+  message?: string
   formData: {
     video_url: string
     link: undefined | boolean
@@ -67,6 +69,12 @@ export interface Task {
     quality: string
     model_name: string
     provider_id: string
+    style?: string
+    extras?: string
+    format?: string[]
+    video_understanding?: boolean
+    video_interval?: number
+    grid_size?: number[]
   }
 }
 
@@ -79,8 +87,25 @@ interface TaskStore {
   clearTasks: () => void
   setCurrentTask: (taskId: string | null) => void
   getCurrentTask: () => Task | null
-  retryTask: (id: string) => void
+  retryTask: (id: string, payload?: any) => void
   replaceTasks: (tasks: Task[]) => void
+}
+
+const emptyTranscript: Transcript = {
+  full_text: '',
+  language: '',
+  raw: null,
+  segments: [],
+}
+
+const emptyAudioMeta: AudioMeta = {
+  cover_url: '',
+  duration: 0,
+  file_path: '',
+  platform: '',
+  raw_info: null,
+  title: '',
+  video_id: '',
 }
 
 export const useTaskStore = create<TaskStore>()(
@@ -90,99 +115,91 @@ export const useTaskStore = create<TaskStore>()(
       currentTaskId: null,
 
       addPendingTask: (taskId: string, platform: string, formData: any) =>
-
         set(state => ({
           tasks: [
             {
-              formData: formData,
+              formData,
               id: taskId,
               status: 'PENDING',
               markdown: '',
-              platform: platform,
-              transcript: {
-                full_text: '',
-                language: '',
-                raw: null,
-                segments: [],
-              },
+              liveMarkdown: '',
+              message: '',
+              transcript: emptyTranscript,
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
               audioMeta: {
-                cover_url: '',
-                duration: 0,
-                file_path: '',
-                platform: '',
-                raw_info: null,
-                title: '',
-                video_id: '',
+                ...emptyAudioMeta,
+                platform,
               },
             },
             ...state.tasks,
           ],
-          currentTaskId: taskId, // 默认设置为当前任务
+          currentTaskId: taskId,
         })),
 
       updateTaskContent: (id, data) =>
-          set(state => ({
-            tasks: state.tasks.map(task => {
-              if (task.id !== id) return task
+        set(state => ({
+          tasks: state.tasks.map(task => {
+            if (task.id !== id) return task
+            if (task.status === 'SUCCESS' && data.status === 'SUCCESS') return task
 
-              if (task.status === 'SUCCESS' && data.status === 'SUCCESS') return task
+            const nextStatus = data.status ?? task.status
 
-              // 如果是 markdown 字符串，封装为版本
-              if (typeof data.markdown === 'string') {
-                const prev = task.markdown
-                const newVersion: Markdown = {
-                  ver_id: `${task.id}-${uuidv4()}`,
-                  content: data.markdown,
-                  style: task.formData.style || '',
-                  model_name: task.formData.model_name || '',
-                  created_at: new Date().toISOString(),
-                }
+            if (typeof data.markdown === 'string' && nextStatus === 'SUCCESS') {
+              const prev = task.markdown
+              const newVersion: Markdown = {
+                ver_id: `${task.id}-${uuidv4()}`,
+                content: data.markdown,
+                style: task.formData.style || '',
+                model_name: task.formData.model_name || '',
+                created_at: new Date().toISOString(),
+              }
 
-                let updatedMarkdown: Markdown[]
-                if (Array.isArray(prev)) {
-                  updatedMarkdown = [newVersion, ...prev]
-                } else {
-                  updatedMarkdown = [
-                    newVersion,
-                    ...(typeof prev === 'string' && prev
-                        ? [{
+              let updatedMarkdown: Markdown[]
+              if (Array.isArray(prev)) {
+                updatedMarkdown = [newVersion, ...prev]
+              } else {
+                updatedMarkdown = [
+                  newVersion,
+                  ...(typeof prev === 'string' && prev
+                    ? [
+                        {
                           ver_id: `${task.id}-${uuidv4()}`,
                           content: prev,
                           style: task.formData.style || '',
                           model_name: task.formData.model_name || '',
                           created_at: new Date().toISOString(),
-                        }]
-                        : []),
-                  ]
-                }
-
-                return {
-                  ...task,
-                  ...data,
-                  markdown: updatedMarkdown,
-                  updatedAt: new Date().toISOString(),
-                }
+                        },
+                      ]
+                    : []),
+                ]
               }
 
-              return { ...task, ...data, updatedAt: new Date().toISOString() }
-            }),
-          })),
+              return {
+                ...task,
+                ...data,
+                markdown: updatedMarkdown,
+                liveMarkdown: '',
+                updatedAt: new Date().toISOString(),
+              }
+            }
 
+            return { ...task, ...data, updatedAt: new Date().toISOString() }
+          }),
+        })),
 
       getCurrentTask: () => {
         const currentTaskId = get().currentTaskId
         return get().tasks.find(task => task.id === currentTaskId) || null
       },
-      retryTask: async (id: string, payload?: any) => {
 
-        if (!id){
+      retryTask: async (id: string, payload?: any) => {
+        if (!id) {
           toast.error('任务不存在')
           return
         }
-        const task = get().tasks.find(task => task.id === id)
-        console.log('retry',task)
+
+        const task = get().tasks.find(item => item.id === id)
         if (!task) return
 
         const newFormData = payload || task.formData
@@ -192,48 +209,42 @@ export const useTaskStore = create<TaskStore>()(
             task_id: id,
           })
         } catch (e: any) {
-          // 就绪门禁：转写模型未下载好。不要把任务标成 PENDING（会一直转），
-          // 给提示让用户先去下载。
           if (e?.data?.reason === 'transcriber_model_not_ready') {
             toast.error(
               e?.data?.downloading
-                ? '转写模型正在下载中，请稍候再重试'
-                : '转写模型尚未下载，请先去「设置 → 音频转写配置」页下载',
+                ? '转写模型正在下载中，请稍后再重试'
+                : '转写模型尚未下载，请先去“设置 -> 音频转写配置”页下载',
             )
             return
           }
-          console.error('重试任务失败：', e)
+          console.error('重试任务失败:', e)
           return
         }
 
         set(state => ({
-          tasks: state.tasks.map(t =>
-              t.id === id
-                  ? {
-                    ...t,
-                    formData: newFormData, // ✅ 显式更新 formData
-                    status: 'PENDING',
-                    updatedAt: new Date().toISOString(),
-                  }
-                  : t
+          tasks: state.tasks.map(item =>
+            item.id === id
+              ? {
+                  ...item,
+                  formData: newFormData,
+                  status: 'PENDING',
+                  liveMarkdown: '',
+                  message: '',
+                  updatedAt: new Date().toISOString(),
+                }
+              : item,
           ),
         }))
       },
 
-
       removeTask: async id => {
-        const task = get().tasks.find(t => t.id === id)
+        const task = get().tasks.find(item => item.id === id)
+        if (!task) return
 
-        if (!task) {
-          return
-        }
-
-        // 先删除云端副本，防止定时同步将刚删除的笔记重新拉回。
         if (getAuthToken()) {
           try {
             await deleteSyncedTask(id)
-          }
-          catch (error) {
+          } catch (error) {
             console.warn('Failed to delete synced task:', error)
             toast.error('删除失败，请检查网络连接后重试')
             return
@@ -250,6 +261,7 @@ export const useTaskStore = create<TaskStore>()(
       clearTasks: () => set({ tasks: [], currentTaskId: null }),
 
       setCurrentTask: taskId => set({ currentTaskId: taskId }),
+
       replaceTasks: tasks =>
         set(state => ({
           tasks,
@@ -273,6 +285,6 @@ export const useTaskStore = create<TaskStore>()(
           await del(name)
         },
       })),
-    }
-  )
+    },
+  ),
 )

@@ -405,6 +405,7 @@ def generate_note(
 def get_task_status(task_id: str):
     status_path = os.path.join(NOTE_OUTPUT_DIR, f"{task_id}.status.json")
     result_path = os.path.join(NOTE_OUTPUT_DIR, f"{task_id}.json")
+    partial_result = NoteGenerator.get_partial_result(task_id)
 
     # 优先读状态文件
     if os.path.exists(status_path):
@@ -422,6 +423,7 @@ def get_task_status(task_id: str):
                 return R.success({
                     "status": status,
                     "result": result_content,
+                    "partial_result": partial_result,
                     "message": message,
                     "task_id": task_id
                 })
@@ -430,16 +432,27 @@ def get_task_status(task_id: str):
                 return R.success({
                     "status": TaskStatus.PENDING.value,
                     "message": "任务完成，但结果文件未找到",
+                    "partial_result": partial_result,
                     "task_id": task_id
                 })
 
         if status == TaskStatus.FAILED.value:
-            return R.error(message or "任务失败", code=500)
+            return R.error(
+                message or "任务失败",
+                code=500,
+                data={
+                    "status": status,
+                    "message": message,
+                    "partial_result": partial_result,
+                    "task_id": task_id,
+                },
+            )
 
         # 处理中状态
         return R.success({
             "status": status,
             "message": message,
+            "partial_result": partial_result,
             "task_id": task_id
         })
 
@@ -450,6 +463,7 @@ def get_task_status(task_id: str):
         return R.success({
             "status": TaskStatus.SUCCESS.value,
             "result": result_content,
+            "partial_result": partial_result,
             "task_id": task_id
         })
 
@@ -457,6 +471,7 @@ def get_task_status(task_id: str):
     return R.success({
         "status": TaskStatus.PENDING.value,
         "message": "任务排队中",
+        "partial_result": partial_result,
         "task_id": task_id
     })
 

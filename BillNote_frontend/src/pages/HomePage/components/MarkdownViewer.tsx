@@ -368,6 +368,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   )
   const retryTask = useTaskStore.getState().retryTask
   const isMultiVersion = Array.isArray(currentTask?.markdown)
+  const liveDraft = typeof currentTask?.liveMarkdown === 'string' ? currentTask.liveMarkdown : ''
   const [showTranscribe, setShowTranscribe] = useState(false)
   const [showChat, setShowChat] = useState<false | 'half' | 'full'>(false)
   const [sharing, setSharing] = useState(false)
@@ -381,12 +382,21 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   useEffect(() => {
     if (!currentTask) return
 
+    if (currentTask.status !== 'SUCCESS') {
+      setCurrentVerId('')
+      setModelName(currentTask.formData.model_name)
+      setStyle(currentTask.formData.style)
+      setCreateTime(currentTask.createdAt)
+      setSelectedContent(liveDraft)
+      return
+    }
+
     if (!isMultiVersion) {
       setCurrentVerId('') // 清空旧版本 ID
       setModelName(currentTask.formData.model_name)
       setStyle(currentTask.formData.style)
       setCreateTime(currentTask.createdAt)
-      setSelectedContent(currentTask?.markdown)
+      setSelectedContent(typeof currentTask.markdown === 'string' ? currentTask.markdown : '')
     } else {
       const latestVersion = [...currentTask.markdown].sort(
         (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
@@ -396,7 +406,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
         setCurrentVerId(latestVersion.ver_id)
       }
     }
-  }, [currentTask?.id, taskStatus])
+  }, [currentTask?.id, taskStatus, liveDraft])
   useEffect(() => {
     if (!currentTask || !isMultiVersion) return
 
@@ -483,6 +493,38 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   }
 
   if (status === 'loading') {
+    if (selectedContent && selectedContent !== 'loading' && selectedContent !== 'empty') {
+      return (
+        <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-white">
+          <div className="border-b bg-amber-50/80 px-3 py-3">
+            <div className="mx-auto flex w-full max-w-5xl flex-col gap-2">
+              <StepBar steps={steps} currentStep={taskStatus} />
+              <div className="text-xs text-amber-700 sm:text-sm">
+                正在生成实时草稿，内容可能继续追加或被合并整理。
+              </div>
+            </div>
+          </div>
+          <ScrollArea className="min-w-0 flex-1">
+            <div className="px-2">
+              <VideoBanner
+                audioMeta={currentTask?.audioMeta}
+                videoUrl={currentTask?.formData?.video_url}
+              />
+            </div>
+            <div className="markdown-body mx-auto w-full max-w-5xl px-3 pb-8 sm:px-5">
+              <ReactMarkdown
+                remarkPlugins={remarkPlugins}
+                rehypePlugins={rehypePlugins}
+                components={markdownComponents}
+              >
+                {renderedContent.replace(/^>\s*鏉ユ簮閾炬帴锛歔^\n]*\n*/m, '')}
+              </ReactMarkdown>
+            </div>
+          </ScrollArea>
+        </div>
+      )
+    }
+
     return (
       <div className="flex h-full w-full flex-col items-center justify-center space-y-4 px-4 text-neutral-500">
         <StepBar steps={steps} currentStep={taskStatus} />

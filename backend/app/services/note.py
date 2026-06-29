@@ -347,6 +347,69 @@ class NoteGenerator:
             except:
                 logger.error(f"写入错误  {e}")
 
+    @staticmethod
+    def _safe_checkpoint_key(task_id: str) -> str:
+        return "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in task_id)
+
+    @classmethod
+    def _load_json_cache(cls, path: Path) -> Optional[dict]:
+        if not path.exists():
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+
+    @classmethod
+    def get_partial_result(cls, task_id: str) -> Optional[dict]:
+        """读取任务进行中的中间产物，供前端轮询时展示实时草稿。"""
+        partial: dict = {}
+
+        audio_cache = cls._load_json_cache(NOTE_OUTPUT_DIR / f"{task_id}_audio.json")
+        if audio_cache:
+            partial["audio_meta"] = audio_cache
+
+        transcript_cache = cls._load_json_cache(
+            NOTE_OUTPUT_DIR / f"{task_id}_transcript.json"
+        )
+        if transcript_cache:
+            partial["transcript"] = transcript_cache
+
+        markdown_cache_path = NOTE_OUTPUT_DIR / f"{task_id}_markdown.md"
+        draft_markdown = ""
+        if markdown_cache_path.exists():
+            try:
+                draft_markdown = markdown_cache_path.read_text(encoding="utf-8").strip()
+            except Exception:
+                draft_markdown = ""
+
+        checkpoint_path = (
+            NOTE_OUTPUT_DIR
+            / f"{cls._safe_checkpoint_key(task_id)}.gpt.checkpoint.json"
+        )
+        checkpoint = cls._load_json_cache(checkpoint_path)
+        if checkpoint:
+            phase = checkpoint.get("phase")
+            partials = checkpoint.get("partials")
+            if phase:
+                partial["checkpoint_phase"] = phase
+            if checkpoint.get("updated_at"):
+                partial["updated_at"] = checkpoint["updated_at"]
+            if not draft_markdown and isinstance(partials, list):
+                chunks = [
+                    item.strip()
+                    for item in partials
+                    if isinstance(item, str) and item.strip()
+                ]
+                if chunks:
+                    separator = "\n\n---\n\n" if phase == "summarize" else "\n\n"
+                    draft_markdown = separator.join(chunks)
+
+        if draft_markdown:
+            partial["markdown"] = draft_markdown
+
+        return partial or None
+
     def _handle_exception(self, task_id, exc):
         logger.error(f"任务异常 (task_id={task_id})", exc_info=True)
         error_message = getattr(exc, 'detail', str(exc))
