@@ -7,14 +7,13 @@ import json
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable, List, Optional
 
 from app.gpt.prompt import BASE_PROMPT, AI_SUM, SCREENSHOT, LINK, MERGE_PROMPT
 from app.gpt.utils import fix_markdown
 from app.gpt.request_chunker import RequestChunker
 from app.models.transcriber_model import TranscriptSegment
 from datetime import timedelta
-from typing import List
-
 
 class UniversalGPT(GPT):
     def __init__(self, client, model: str, temperature: float = 0.7):
@@ -23,7 +22,9 @@ class UniversalGPT(GPT):
         self.temperature = temperature
         self.screenshot = False
         self.link = False
-        self.max_request_bytes = int(os.getenv("OPENAI_MAX_REQUEST_BYTES", str(45 * 1024 * 1024)))
+        # 45MB 会让几乎所有普通任务都走单次总结，实时草稿难以出现。
+        # 将默认阈值下调到 256KB，仅对较长转写触发分块，兼顾草稿可见性与请求次数。
+        self.max_request_bytes = int(os.getenv("OPENAI_MAX_REQUEST_BYTES", str(256 * 1024)))
         self.checkpoint_dir = Path(os.getenv("NOTE_OUTPUT_DIR", "note_results"))
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         # 初始化时缓存重试配置，避免每次请求重复读取环境变量
@@ -230,6 +231,90 @@ class UniversalGPT(GPT):
             raise last_exc
         raise RuntimeError("chat completion failed without exception")
 
+    @staticmethod
+    def _extract_stream_delta(chunk) -> str:
+        choices = getattr(chunk, "choices", None) or []
+        if not choices:
+            return ""
+        delta = getattr(choices[0], "delta", None)
+        content = getattr(delta, "content", "") if delta else ""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts = []
+            for item in content:
+                if isinstance(item, dict):
+                    if item.get("type") == "text":
+                        parts.append(item.get("text", ""))
+                    elif "text" in item:
+                        parts.append(str(item.get("text", "")))
+                else:
+                    text = getattr(item, "text", "")
+                    if text:
+                        parts.append(text)
+            return "".join(parts)
+        return ""
+
+    def _do_stream(self, messages: list):
+        try:
+            return self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=self.temperature,
+                stream=True,
+            )
+        except Exception as exc:
+            if self._is_temperature_unsupported_error(exc):
+                print(f"[universal_gpt] 模型 {self.model} 不支持自定义 temperature，改用默认值重试")
+                return self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    stream=True,
+                )
+            raise
+
+    def _chat_completion_stream(
+        self,
+        messages: list,
+        on_partial: Optional[Callable[[str], None]] = None,
+    ) -> str:
+        stream = self._do_stream(messages)
+        chunks: list[str] = []
+        emitted_chars = 0
+        last_emit_at = time.monotonic()
+
+        for chunk in stream:
+            delta_text = self._extract_stream_delta(chunk)
+            if not delta_text:
+                continue
+            chunks.append(delta_text)
+            current_text = "".join(chunks).strip()
+            if not current_text or not on_partial:
+                continue
+
+            should_emit = (
+                len(current_text) - emitted_chars >= 160
+                or time.monotonic() - last_emit_at >= 0.5
+            )
+            if should_emit:
+                on_partial(current_text)
+                emitted_chars = len(current_text)
+                last_emit_at = time.monotonic()
+
+        final_text = "".join(chunks).strip()
+        if final_text and on_partial and len(final_text) != emitted_chars:
+            on_partial(final_text)
+        return final_text
+
+    @staticmethod
+    def _join_partial_drafts(partials: list[str]) -> str:
+        chunks = [item.strip() for item in partials if isinstance(item, str) and item.strip()]
+        if not chunks:
+            return ""
+        if len(chunks) == 1:
+            return chunks[0]
+        return "\n\n---\n\n".join(chunks)
+
     def _merge_partials(self, partials: list, checkpoint_key: str | None, source_signature: str | None) -> str:
         def build_messages(texts, *_args, **_kwargs):
             return self._build_merge_messages(texts)
@@ -266,7 +351,11 @@ class UniversalGPT(GPT):
 
         return current_partials[0]
 
-    def summarize(self, source: GPTSource) -> str:
+    def summarize(
+        self,
+        source: GPTSource,
+        on_partial: Optional[Callable[[str], None]] = None,
+    ) -> str:
         self.screenshot = source.screenshot
         self.link = source.link
         source.segment = self.ensure_segments_type(source.segment)
@@ -319,21 +408,34 @@ class UniversalGPT(GPT):
                 extras=source.extras
             )
             try:
-                response = self._chat_completion_create(messages)
+                if on_partial:
+                    def emit_chunk_draft(current_chunk_text: str):
+                        current_draft = self._join_partial_drafts(partials + [current_chunk_text])
+                        if current_draft:
+                            on_partial(current_draft)
+
+                    chunk_text = self._chat_completion_stream(messages, emit_chunk_draft)
+                else:
+                    response = self._chat_completion_create(messages)
+                    chunk_text = response.choices[0].message.content.strip()
             except Exception as exc:
                 if checkpoint_key and source_signature:
                     self._save_checkpoint(checkpoint_key, source_signature, partials, "summarize")
                 raise
 
-            partials.append(response.choices[0].message.content.strip())
+            partials.append(chunk_text)
             if checkpoint_key and source_signature:
                 self._save_checkpoint(checkpoint_key, source_signature, partials, "summarize")
 
         if len(partials) == 1:
             if checkpoint_key:
                 self._clear_checkpoint(checkpoint_key)
+            if on_partial and partials[0]:
+                on_partial(partials[0])
             return partials[0]
         merged = self._merge_partials(partials, checkpoint_key, source_signature)
         if checkpoint_key:
             self._clear_checkpoint(checkpoint_key)
+        if on_partial and merged:
+            on_partial(merged)
         return merged

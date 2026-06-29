@@ -348,6 +348,13 @@ class NoteGenerator:
                 logger.error(f"写入错误  {e}")
 
     @staticmethod
+    def _atomic_write_text(path: Path, content: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp_file = path.with_suffix(path.suffix + ".tmp")
+        temp_file.write_text(content, encoding="utf-8")
+        temp_file.replace(path)
+
+    @staticmethod
     def _safe_checkpoint_key(task_id: str) -> str:
         return "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in task_id)
 
@@ -736,8 +743,17 @@ class NoteGenerator:
         )
 
         try:
-            markdown = gpt.summarize(source)
-            markdown_cache_file.write_text(markdown, encoding="utf-8")
+            last_partial = {"content": ""}
+
+            def persist_partial(markdown_partial: str):
+                cleaned = (markdown_partial or "").strip()
+                if not cleaned or cleaned == last_partial["content"]:
+                    return
+                last_partial["content"] = cleaned
+                self._atomic_write_text(markdown_cache_file, cleaned)
+
+            markdown = gpt.summarize(source, on_partial=persist_partial)
+            self._atomic_write_text(markdown_cache_file, markdown)
             logger.info(f"GPT 总结并缓存成功 ({markdown_cache_file})")
             return markdown
         except Exception as exc:
