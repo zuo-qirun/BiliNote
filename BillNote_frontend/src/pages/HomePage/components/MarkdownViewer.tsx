@@ -504,7 +504,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
               </div>
             </div>
           </div>
-          <ScrollArea className="min-w-0 flex-1">
+          <ScrollArea className="h-full min-h-0 min-w-0 flex-1 touch-pan-y overscroll-y-contain">
             <div className="px-2">
               <VideoBanner
                 audioMeta={currentTask?.audioMeta}
@@ -609,7 +609,13 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
                 </div>
               ) : (
               <>
-              <ScrollArea className={showChat === 'half' ? 'hidden min-w-0 flex-1 sm:block' : 'min-w-0 flex-1'}>
+              <ScrollArea
+                className={
+                  showChat === 'half'
+                    ? 'hidden h-full min-h-0 min-w-0 flex-1 touch-pan-y overscroll-y-contain sm:block'
+                    : 'h-full min-h-0 min-w-0 flex-1 touch-pan-y overscroll-y-contain'
+                }
+              >
                 <div className="px-2">
                   <VideoBanner
                     audioMeta={currentTask?.audioMeta}
