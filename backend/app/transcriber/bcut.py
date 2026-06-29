@@ -1,7 +1,7 @@
 import json
-import logging
+import os
 import time
-from typing import Optional, List, Dict, Union
+from typing import List
 
 import requests
 
@@ -29,6 +29,7 @@ API_QUERY_RESULT = API_BASE_URL + "/task/result"
 
 logger = get_logger(__name__)
 
+
 class BcutTranscriber(Transcriber):
     """必剪 语音识别接口"""
     headers = {
@@ -37,27 +38,21 @@ class BcutTranscriber(Transcriber):
     }
 
     def __init__(self):
-        self.session = requests.Session()
-        self.task_id = None
-        self.__etags = []
-
-        self.__in_boss_key: Optional[str] = None
-        self.__resource_id: Optional[str] = None
-        self.__upload_id: Optional[str] = None
-        self.__upload_urls: List[str] = []
-        self.__per_size: Optional[int] = None
-        self.__clips: Optional[int] = None
-
-        self.__etags: List[str] = []
-        self.__download_url: Optional[str] = None
-        self.task_id: Optional[str] = None
+        self.commit_max_attempts = max(
+            1,
+            int(os.getenv("BCUT_COMMIT_MAX_ATTEMPTS", "3")),
+        )
+        self.commit_retry_base_seconds = max(
+            0.0,
+            float(os.getenv("BCUT_COMMIT_RETRY_BASE_SECONDS", "1")),
+        )
         
     def _load_file(self, file_path: str) -> bytes:
         """读取文件内容"""
         with open(file_path, 'rb') as f:
             return f.read()
 
-    def _upload(self, file_path: str) -> None:
+    def _upload(self, file_path: str, session: requests.Session) -> str:
         """申请上传"""
         file_binary = self._load_file(file_path)
         if not file_binary:
@@ -71,73 +66,141 @@ class BcutTranscriber(Transcriber):
             "model_id": "8",
         })
 
-        resp = self.session.post(
+        resp = session.post(
             API_REQ_UPLOAD,
             data=payload,
-            headers=self.headers
+            headers=self.headers,
+            timeout=30,
         )
         resp.raise_for_status()
         resp = resp.json()
         resp_data = resp["data"]
 
-        self.__in_boss_key = resp_data["in_boss_key"]
-        self.__resource_id = resp_data["resource_id"]
-        self.__upload_id = resp_data["upload_id"]
-        self.__upload_urls = resp_data["upload_urls"]
-        self.__per_size = resp_data["per_size"]
-        self.__clips = len(resp_data["upload_urls"])
+        in_boss_key = resp_data["in_boss_key"]
+        resource_id = resp_data["resource_id"]
+        upload_id = resp_data["upload_id"]
+        upload_urls = resp_data["upload_urls"]
+        per_size = resp_data["per_size"]
 
         logger.info(
-            f"申请上传成功, 总计大小{resp_data['size'] // 1024}KB, {self.__clips}分片, 分片大小{resp_data['per_size'] // 1024}KB: {self.__in_boss_key}"
+            f"申请上传成功, 总计大小{resp_data['size'] // 1024}KB, {len(upload_urls)}分片, 分片大小{per_size // 1024}KB: {in_boss_key}"
         )
-        self.__upload_part(file_binary)
-        self.__commit_upload()
+        etags = self.__upload_part(
+            session=session,
+            file_binary=file_binary,
+            upload_urls=upload_urls,
+            per_size=per_size,
+        )
+        return self.__commit_upload(
+            session=session,
+            in_boss_key=in_boss_key,
+            resource_id=resource_id,
+            upload_id=upload_id,
+            etags=etags,
+        )
 
-    def __upload_part(self, file_binary: bytes) -> None:
+    def __upload_part(
+        self,
+        session: requests.Session,
+        file_binary: bytes,
+        upload_urls: List[str],
+        per_size: int,
+    ) -> List[str]:
         """上传音频数据"""
-        for clip in range(self.__clips):
-            start_range = clip * self.__per_size
-            end_range = min((clip + 1) * self.__per_size, len(file_binary))
+        etags: List[str] = []
+        for clip, upload_url in enumerate(upload_urls):
+            start_range = clip * per_size
+            end_range = min((clip + 1) * per_size, len(file_binary))
             logger.info(f"开始上传分片{clip}: {start_range}-{end_range}")
-            resp = self.session.put(
-                self.__upload_urls[clip],
+            resp = session.put(
+                upload_url,
                 data=file_binary[start_range:end_range],
-                headers={'Content-Type': 'application/octet-stream'}
+                headers={'Content-Type': 'application/octet-stream'},
+                timeout=120,
             )
             resp.raise_for_status()
             etag = resp.headers.get("Etag", "").strip('"')
-            self.__etags.append(etag)
+            if not etag:
+                raise RuntimeError(f"分片{clip}上传成功但未返回 ETag")
+            etags.append(etag)
             logger.info(f"分片{clip}上传成功: {etag}")
+        return etags
 
-    def __commit_upload(self) -> None:
+    def __commit_upload(
+        self,
+        session: requests.Session,
+        in_boss_key: str,
+        resource_id: str,
+        upload_id: str,
+        etags: List[str],
+    ) -> str:
         """提交上传数据"""
         data = json.dumps({
-            "InBossKey": self.__in_boss_key,
-            "ResourceId": self.__resource_id,
-            "Etags": ",".join(self.__etags),
-            "UploadId": self.__upload_id,
+            "InBossKey": in_boss_key,
+            "ResourceId": resource_id,
+            "Etags": ",".join(etags),
+            "UploadId": upload_id,
             "model_id": "8",
         })
-        resp = self.session.post(
-            API_COMMIT_UPLOAD,
-            data=data,
-            headers=self.headers
-        )
-        resp.raise_for_status()
-        resp = resp.json()
-        print('Bili',resp)
-        if resp.get("code") != 0:
-            error_msg = f"上传提交失败: {resp.get('message', '未知错误')}"
-            logger.error(error_msg)
-            raise Exception(error_msg)
-            
-        self.__download_url = resp["data"]["download_url"]
-        logger.info(f"提交成功，下载链接: {self.__download_url}")
 
-    def _create_task(self) -> str:
+        for attempt in range(1, self.commit_max_attempts + 1):
+            try:
+                response = session.post(
+                    API_COMMIT_UPLOAD,
+                    data=data,
+                    headers=self.headers,
+                    timeout=30,
+                )
+                response.raise_for_status()
+                response_data = response.json()
+                code = response_data.get("code")
+                if code == 0:
+                    download_url = response_data["data"]["download_url"]
+                    logger.info("上传提交成功")
+                    return download_url
+
+                error_msg = response_data.get("message", "未知错误")
+                if code != 139201:
+                    raise RuntimeError(f"上传提交失败: {error_msg} (code={code})")
+                failure = RuntimeError(
+                    f"上传提交失败: {error_msg} (code={code})"
+                )
+            except (requests.RequestException, ValueError, KeyError) as exc:
+                failure = exc
+
+            if attempt >= self.commit_max_attempts:
+                logger.error(
+                    "上传提交在 %s 次尝试后仍失败: %s",
+                    attempt,
+                    failure,
+                )
+                raise RuntimeError(
+                    f"上传提交失败，已重试 {attempt} 次: {failure}"
+                ) from failure
+
+            delay = self.commit_retry_base_seconds * (2 ** (attempt - 1))
+            logger.warning(
+                "上传提交第 %s/%s 次失败: %s；%.1f 秒后重试",
+                attempt,
+                self.commit_max_attempts,
+                failure,
+                delay,
+            )
+            time.sleep(delay)
+
+        raise RuntimeError("上传提交失败")
+
+    def _create_task(
+        self,
+        session: requests.Session,
+        download_url: str,
+    ) -> str:
         """开始创建转换任务"""
-        resp = self.session.post(
-            API_CREATE_TASK, json={"resource": self.__download_url, "model_id": "8"}, headers=self.headers
+        resp = session.post(
+            API_CREATE_TASK,
+            json={"resource": download_url, "model_id": "8"},
+            headers=self.headers,
+            timeout=30,
         )
         resp.raise_for_status()
         resp = resp.json()
@@ -146,16 +209,21 @@ class BcutTranscriber(Transcriber):
             logger.error(error_msg)
             raise Exception(error_msg)
             
-        self.task_id = resp["data"]["task_id"]
-        logger.info(f"任务已创建: {self.task_id}")
-        return self.task_id
+        task_id = resp["data"]["task_id"]
+        logger.info(f"任务已创建: {task_id}")
+        return task_id
 
-    def _query_result(self) -> dict:
+    def _query_result(
+        self,
+        session: requests.Session,
+        task_id: str,
+    ) -> dict:
         """查询转换结果"""
-        resp = self.session.get(
+        resp = session.get(
             API_QUERY_RESULT, 
-            params={"model_id": 7, "task_id": self.task_id}, 
-            headers=self.headers
+            params={"model_id": 7, "task_id": task_id},
+            headers=self.headers,
+            timeout=30,
         )
         resp.raise_for_status()
         resp = resp.json()
@@ -171,21 +239,22 @@ class BcutTranscriber(Transcriber):
         """执行识别过程，符合 Transcriber 接口"""
         try:
             logger.info(f"开始处理文件: {file_path}")
+            session = requests.Session()
             
             # 上传文件
             logger.info("正在上传文件...")
-            self._upload(file_path)
+            download_url = self._upload(file_path, session)
             
             # 创建任务
             logger.info("提交转录任务...")
-            self._create_task()
+            task_id = self._create_task(session, download_url)
             
             # 轮询检查任务状态
             logger.info("等待转录结果...")
             task_resp = None
             max_retries = 500
             for i in range(max_retries):
-                task_resp = self._query_result()
+                task_resp = self._query_result(session, task_id)
                 
                 if task_resp["state"] == 4:  # 完成状态
                     break

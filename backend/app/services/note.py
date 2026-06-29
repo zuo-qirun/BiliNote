@@ -556,7 +556,7 @@ class NoteGenerator:
         # 调用转写器
         try:
             logger.info("开始转写音频")
-            transcript = self.transcriber.transcript(file_path=audio_file)
+            transcript = self._transcribe_with_fallback(audio_file)
             transcript_cache_file.write_text(json.dumps(asdict(transcript), ensure_ascii=False, indent=2), encoding="utf-8")
             logger.info(f"转写并缓存成功 ({transcript_cache_file})")
             return transcript
@@ -564,6 +564,70 @@ class NoteGenerator:
             logger.error(f"音频转写失败：{exc}")
             self._handle_exception(task_id, exc)
             raise
+
+    def _transcribe_with_fallback(self, audio_file: str) -> TranscriptResult:
+        """使用主转写器，失败时按配置尝试备用转写器。
+
+        默认只为 bcut 启用 kuaishou 回退。可以用
+        TRANSCRIBER_FALLBACKS=kuaishou,fast-whisper 调整顺序；空值表示禁用。
+        回退仅作用于当前任务，不修改管理员选择的全局转写配置。
+        """
+        try:
+            result = self.transcriber.transcript(file_path=audio_file)
+            full_text = (result.full_text or "").strip() if result else ""
+            if not full_text:
+                raise RuntimeError("转写器返回了空结果")
+            return result
+        except Exception as primary_error:
+            default_fallbacks = "kuaishou" if self.transcriber_type == "bcut" else ""
+            configured = os.getenv(
+                "TRANSCRIBER_FALLBACKS",
+                default_fallbacks,
+            )
+            fallback_types = [
+                item.strip()
+                for item in configured.split(",")
+                if item.strip() and item.strip() != self.transcriber_type
+            ]
+            if not fallback_types:
+                raise
+
+            logger.warning(
+                "主转写器 %s 失败: %s；开始尝试备用转写器: %s",
+                self.transcriber_type,
+                primary_error,
+                ", ".join(fallback_types),
+            )
+            fallback_errors = []
+            for fallback_type in fallback_types:
+                try:
+                    if fallback_type not in _transcribers:
+                        raise RuntimeError(f"不支持的备用转写器: {fallback_type}")
+                    fallback = get_transcriber(
+                        transcriber_type=fallback_type,
+                        model_size=self.model_size,
+                        device=self.device,
+                    )
+                    result = fallback.transcript(file_path=audio_file)
+                    full_text = (result.full_text or "").strip() if result else ""
+                    if not full_text:
+                        raise RuntimeError("备用转写器返回了空结果")
+                    logger.info("备用转写器 %s 转写成功", fallback_type)
+                    return result
+                except Exception as fallback_error:
+                    logger.warning(
+                        "备用转写器 %s 失败: %s",
+                        fallback_type,
+                        fallback_error,
+                    )
+                    fallback_errors.append(
+                        f"{fallback_type}: {fallback_error}"
+                    )
+
+            raise RuntimeError(
+                f"主转写器 {self.transcriber_type} 失败: {primary_error}；"
+                f"备用转写器也失败: {'; '.join(fallback_errors)}"
+            ) from primary_error
 
     def _summarize_text(
         self,
