@@ -48,7 +48,11 @@ export const useTaskPolling = (interval = 3000) => {
           }
 
           if (status === 'FAILED') {
-            updateTaskContent(task.id, { status, message: res?.message || '任务失败' })
+            updateTaskContent(task.id, {
+              status,
+              message: res?.message || '任务失败',
+              errorDetail: res?.error_detail,
+            })
             console.warn(`Task ${task.id} failed`)
             continue
           }
@@ -59,7 +63,11 @@ export const useTaskPolling = (interval = 3000) => {
         } catch (e: any) {
           console.error('轮询任务失败:', e)
           const message = e?.data?.message || e?.msg || '任务失败'
-          updateTaskContent(task.id, { status: 'FAILED', message })
+          updateTaskContent(task.id, {
+            status: 'FAILED',
+            message,
+            errorDetail: e?.data?.error_detail,
+          })
         }
       }
     }, interval)

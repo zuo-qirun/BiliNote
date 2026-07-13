@@ -3,7 +3,6 @@ import ReactMarkdown from 'react-markdown'
 import { Button } from '@/components/ui/button.tsx'
 import { Copy, Download, ArrowRight, Play, ExternalLink } from 'lucide-react'
 import { toast } from 'react-hot-toast'
-import Error from '@/components/Lottie/error.tsx'
 import Loading from '@/components/Lottie/Loading.tsx'
 import Idle from '@/components/Lottie/Idle.tsx'
 import StepBar from '@/pages/HomePage/components/StepBar.tsx'
@@ -26,6 +25,7 @@ import MarkmapEditor from '@/pages/HomePage/components/MarkmapComponent.tsx'
 import ChatPanel from '@/pages/HomePage/components/ChatPanel.tsx'
 import VideoBanner from '@/pages/HomePage/components/VideoBanner.tsx'
 import { shareNote } from '@/services/note.ts'
+import { TaskErrorPanel } from '@/pages/HomePage/components/TaskErrorPanel'
 
 interface VersionNote {
   ver_id: string
@@ -550,19 +550,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   }
 
   if (status === 'failed' && !isMultiVersion) {
-    return (
-      <div className="flex h-full w-full flex-col items-center justify-center gap-4 space-y-3 px-4">
-        <Error />
-        <div className="text-center">
-          <p className="text-lg font-bold text-red-500">笔记生成失败</p>
-          <p className="mt-2 mb-2 text-xs text-red-400">请检查后台或稍后再试</p>
-
-          <Button onClick={() => retryTask(currentTask.id)} size="lg">
-            重试
-          </Button>
-        </div>
-      </div>
-    )
+    return currentTask ? <TaskErrorPanel task={currentTask} onRetry={() => retryTask(currentTask.id)} /> : null
   }
 
   return (

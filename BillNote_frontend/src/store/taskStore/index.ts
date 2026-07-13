@@ -51,6 +51,17 @@ export interface Markdown {
   created_at: string
 }
 
+export interface TaskErrorDetail {
+  code: string
+  title: string
+  summary: string
+  stage: 'unknown' | 'downloading' | 'transcribing' | 'summarizing' | string
+  retryable: boolean
+  possible_causes: string[]
+  suggestions: string[]
+  technical_message: string
+}
+
 export interface Task {
   id: string
   markdown: string | Markdown[]
@@ -61,6 +72,7 @@ export interface Task {
   createdAt: string
   updatedAt?: string
   message?: string
+  errorDetail?: TaskErrorDetail
   formData: {
     video_url: string
     link: undefined | boolean
@@ -124,6 +136,7 @@ export const useTaskStore = create<TaskStore>()(
               markdown: '',
               liveMarkdown: '',
               message: '',
+              errorDetail: undefined,
               transcript: emptyTranscript,
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
@@ -230,6 +243,7 @@ export const useTaskStore = create<TaskStore>()(
                   status: 'PENDING',
                   liveMarkdown: '',
                   message: '',
+                  errorDetail: undefined,
                   updatedAt: new Date().toISOString(),
                 }
               : item,

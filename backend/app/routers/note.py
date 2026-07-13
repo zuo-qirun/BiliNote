@@ -24,6 +24,7 @@ from app.exceptions.note import NoteError
 from app.services.note import NoteGenerator, logger
 from app.services.task_serial_executor import task_serial_executor
 from app.utils.response import ResponseWrapper as R
+from app.utils.error_diagnosis import diagnose_task_error
 from app.utils.url_parser import extract_video_id
 from app.validators.video_url_validator import is_supported_video_url
 from fastapi import APIRouter, Request, HTTPException
@@ -437,12 +438,20 @@ def get_task_status(task_id: str):
                 })
 
         if status == TaskStatus.FAILED.value:
+            if partial_result and partial_result.get("transcript"):
+                failed_stage = "summarizing"
+            elif partial_result and partial_result.get("audio_meta"):
+                failed_stage = "transcribing"
+            else:
+                failed_stage = "unknown"
+            error_detail = diagnose_task_error(message, stage=failed_stage)
             return R.error(
                 message or "任务失败",
                 code=500,
                 data={
                     "status": status,
                     "message": message,
+                    "error_detail": error_detail,
                     "partial_result": partial_result,
                     "task_id": task_id,
                 },
