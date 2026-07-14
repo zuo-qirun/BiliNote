@@ -7,12 +7,12 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form.tsx'
-import { useEffect,useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 
-import { Info, Loader2, Plus } from 'lucide-react'
+import { AlertCircle, CheckCircle2, Info, Loader2, Plus, UploadCloud, X } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert.tsx'
 import { generateNote } from '@/services/note.ts'
 import { uploadFile } from '@/services/upload.ts'
@@ -132,6 +132,11 @@ const NoteForm = () => {
   const navigate = useNavigate();
   const [isUploading, setIsUploading] = useState(false)
   const [uploadSuccess, setUploadSuccess] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [uploadFileName, setUploadFileName] = useState('')
+  const [uploadFileSize, setUploadFileSize] = useState(0)
+  const [uploadError, setUploadError] = useState('')
+  const uploadControllerRef = useRef<AbortController | null>(null)
   /* ---- 全局状态 ---- */
   const { addPendingTask, currentTaskId, setCurrentTask, getCurrentTask, retryTask } =
     useTaskStore()
@@ -199,22 +204,59 @@ const NoteForm = () => {
   const isGenerating = () => !['SUCCESS', 'FAILED', undefined].includes(getCurrentTask()?.status)
   const generating = isGenerating()
   const handleFileUpload = async (file: File, cb: (url: string) => void) => {
-    const formData = new FormData()
-    formData.append('file', file)
+    if (isUploading) return
+
+    const allowedVideo = /\.(mp4|mkv|mov|avi|webm|flv|m4v|mpeg|mpg|ts)$/i.test(file.name)
+    if (!allowedVideo) {
+      setUploadError('不支持该文件格式，请选择 MP4、MKV、MOV、AVI 或 WebM 等视频文件')
+      setUploadSuccess(false)
+      return
+    }
+
+    const controller = new AbortController()
+    uploadControllerRef.current = controller
     setIsUploading(true)
     setUploadSuccess(false)
+    setUploadProgress(0)
+    setUploadFileName(file.name)
+    setUploadFileSize(file.size)
+    setUploadError('')
 
     try {
-  
-      const  data  = await uploadFile(formData)
-        cb(data.url)
-        setUploadSuccess(true)
-    } catch (err) {
+      const data = await uploadFile(file, {
+        signal: controller.signal,
+        onProgress: (loaded, total) => {
+          const percent = Math.round((loaded / Math.max(total, file.size, 1)) * 100)
+          setUploadProgress(Math.min(percent, 99))
+        },
+      })
+      cb(data.url)
+      setUploadProgress(100)
+      setUploadSuccess(true)
+      toast.success('视频上传成功，可以开始生成笔记')
+    } catch (err: any) {
       console.error('上传失败:', err)
-      // message.error('上传失败，请重试')
+      const cancelled = err?.code === 'ERR_CANCELED' || controller.signal.aborted
+      const message = cancelled
+        ? '已取消上传'
+        : err?.msg || err?.data?.message || '视频上传失败，请稍后重试'
+      setUploadError(message)
+      if (!cancelled) toast.error(message)
     } finally {
       setIsUploading(false)
+      uploadControllerRef.current = null
     }
+  }
+
+  const cancelUpload = (event: React.MouseEvent) => {
+    event.stopPropagation()
+    uploadControllerRef.current?.abort()
+  }
+
+  const formatFileSize = (bytes: number) => {
+    if (!bytes) return '0 MB'
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`
   }
 
   const onSubmit = async (values: NoteFormValues) => {
@@ -354,17 +396,28 @@ const NoteForm = () => {
                 {platform === 'local' && (
                   <>
                     <div
-                      className="hover:border-primary mt-2 flex h-40 cursor-pointer items-center justify-center rounded-md border-2 border-dashed border-gray-300 transition-colors"
+                      className={`group relative mt-2 flex min-h-40 items-center justify-center overflow-hidden rounded-xl border-2 border-dashed px-5 py-6 transition-all ${
+                        uploadError
+                          ? 'border-red-300 bg-red-50/50'
+                          : uploadSuccess
+                            ? 'border-emerald-300 bg-emerald-50/50'
+                            : isUploading
+                              ? 'cursor-progress border-blue-300 bg-blue-50/40'
+                              : 'hover:border-primary cursor-pointer border-gray-300 bg-gradient-to-br from-white to-neutral-50 hover:shadow-sm'
+                      }`}
+                      aria-busy={isUploading}
                       onDragOver={e => {
                         e.preventDefault()
                         e.stopPropagation()
                       }}
                       onDrop={e => {
                         e.preventDefault()
+                        if (isUploading) return
                         const file = e.dataTransfer.files?.[0]
                         if (file) handleFileUpload(file, field.onChange)
                       }}
                       onClick={() => {
+                        if (isUploading) return
                         const input = document.createElement('input')
                         input.type = 'file'
                         input.accept = 'video/*'
@@ -376,14 +429,63 @@ const NoteForm = () => {
                       }}
                     >
                       {isUploading ? (
-                        <p className="text-center text-sm text-blue-500">上传中，请稍候…</p>
+                        <div className="w-full max-w-md" onClick={e => e.stopPropagation()}>
+                          <div className="flex items-center gap-3">
+                            <div className="rounded-lg bg-blue-600 p-2 text-white shadow-sm">
+                              <UploadCloud className="h-5 w-5 animate-pulse" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center justify-between gap-3">
+                                <p className="truncate text-sm font-semibold text-neutral-900">{uploadFileName}</p>
+                                <span className="font-mono text-sm font-bold text-blue-700">{uploadProgress}%</span>
+                              </div>
+                              <p className="mt-0.5 text-xs text-neutral-500">
+                                正在上传 · {formatFileSize(uploadFileSize)}，请勿关闭页面
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={cancelUpload}
+                              className="rounded-full p-1.5 text-neutral-400 transition-colors hover:bg-white hover:text-red-600"
+                              aria-label="取消上传"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          </div>
+                          <div className="mt-4 h-2 overflow-hidden rounded-full bg-blue-100">
+                            <div
+                              className="h-full rounded-full bg-[linear-gradient(90deg,#2563eb,#38bdf8)] transition-[width] duration-300 ease-out"
+                              style={{ width: `${uploadProgress}%` }}
+                              role="progressbar"
+                              aria-label="视频上传进度"
+                              aria-valuemin={0}
+                              aria-valuemax={100}
+                              aria-valuenow={uploadProgress}
+                            />
+                          </div>
+                        </div>
                       ) : uploadSuccess ? (
-                        <p className="text-center text-sm text-green-500">上传成功！</p>
+                        <div className="flex flex-col items-center text-center">
+                          <CheckCircle2 className="h-8 w-8 text-emerald-600" />
+                          <p className="mt-2 text-sm font-semibold text-emerald-800">上传成功，可以生成笔记</p>
+                          <p className="mt-1 max-w-xs truncate text-xs text-emerald-700/70">{uploadFileName}</p>
+                          <p className="mt-2 text-xs text-neutral-500">点击或拖入其他文件可重新上传</p>
+                        </div>
+                      ) : uploadError ? (
+                        <div className="flex max-w-sm flex-col items-center text-center">
+                          <AlertCircle className="h-8 w-8 text-red-600" />
+                          <p className="mt-2 text-sm font-semibold text-red-800">上传失败</p>
+                          <p className="mt-1 text-xs leading-5 text-red-700">{uploadError}</p>
+                          <p className="mt-2 text-xs text-neutral-500">点击此处重新选择文件</p>
+                        </div>
                       ) : (
-                        <p className="text-center text-sm text-gray-500">
-                          拖拽文件到这里上传 <br />
-                          <span className="text-xs text-gray-400">或点击选择文件</span>
-                        </p>
+                        <div className="flex flex-col items-center text-center">
+                          <div className="rounded-xl border border-neutral-200 bg-white p-3 text-neutral-600 shadow-sm transition-transform group-hover:-translate-y-0.5">
+                            <UploadCloud className="h-6 w-6" />
+                          </div>
+                          <p className="mt-3 text-sm font-semibold text-neutral-700">拖拽视频到这里上传</p>
+                          <p className="mt-1 text-xs text-neutral-400">或点击选择 MP4、MKV、MOV、AVI、WebM 文件</p>
+                        </div>
                       )}
                     </div>
                   </>

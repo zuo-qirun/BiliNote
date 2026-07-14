@@ -121,7 +121,12 @@ class VideoRequest(BaseModel):
 NOTE_OUTPUT_DIR = os.getenv("NOTE_OUTPUT_DIR", "note_results")
 SHARE_OUTPUT_DIR = Path(NOTE_OUTPUT_DIR) / "shares"
 ACCOUNT_DB_PATH = Path(NOTE_OUTPUT_DIR) / "accounts.sqlite3"
-UPLOAD_DIR = "uploads"
+UPLOAD_DIR = Path("uploads")
+UPLOAD_CHUNK_SIZE = 1024 * 1024
+UPLOAD_MAX_BYTES = int(os.getenv("UPLOAD_MAX_BYTES", str(10 * 1024 * 1024 * 1024)))
+ALLOWED_VIDEO_SUFFIXES = {
+    ".mp4", ".mkv", ".mov", ".avi", ".webm", ".flv", ".m4v", ".mpeg", ".mpg", ".ts",
+}
 
 
 def _account_db():
@@ -327,14 +332,56 @@ def delete_task(data: RecordRequest):
 
 @router.post("/upload")
 async def upload(file: UploadFile = File(...)):
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-    file_location = os.path.join(UPLOAD_DIR, file.filename)
+    original_name = Path(file.filename or "video").name
+    suffix = Path(original_name).suffix.lower()
+    if suffix not in ALLOWED_VIDEO_SUFFIXES:
+        await file.close()
+        return R.error(
+            msg="不支持该文件格式，请上传 MP4、MKV、MOV、AVI、WebM 等常见视频文件",
+            code=400,
+            data={"reason": "unsupported_video_format"},
+        )
 
-    with open(file_location, "wb+") as f:
-        f.write(await file.read())
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    safe_stem = re.sub(r"[^\w.-]+", "_", Path(original_name).stem, flags=re.UNICODE).strip("._")[:80]
+    safe_stem = safe_stem or "video"
+    stored_name = f"{safe_stem}-{uuid.uuid4().hex[:12]}{suffix}"
+    file_location = UPLOAD_DIR / stored_name
+    uploaded_bytes = 0
 
-    # 假设你静态目录挂载了 /uploads
-    return R.success({"url": f"/uploads/{file.filename}"})
+    try:
+        with file_location.open("xb") as destination:
+            while chunk := await file.read(UPLOAD_CHUNK_SIZE):
+                uploaded_bytes += len(chunk)
+                if uploaded_bytes > UPLOAD_MAX_BYTES:
+                    raise ValueError("upload_too_large")
+                destination.write(chunk)
+    except ValueError as exc:
+        file_location.unlink(missing_ok=True)
+        if str(exc) == "upload_too_large":
+            return R.error(
+                msg=f"文件超过服务器允许的最大大小（{UPLOAD_MAX_BYTES // 1024 // 1024} MB）",
+                code=413,
+                data={"reason": "upload_too_large", "max_bytes": UPLOAD_MAX_BYTES},
+            )
+        raise
+    except Exception as exc:
+        file_location.unlink(missing_ok=True)
+        logger.error("保存上传视频失败: %s", exc, exc_info=True)
+        return R.error(
+            msg="服务器保存视频失败，请检查磁盘空间后重试",
+            code=500,
+            data={"reason": "upload_save_failed"},
+        )
+    finally:
+        await file.close()
+
+    return R.success({
+        "url": f"/uploads/{stored_name}",
+        "filename": stored_name,
+        "original_filename": original_name,
+        "size": uploaded_bytes,
+    })
 
 
 @router.post("/generate_note")
