@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link2, LoaderCircle, Play, Share2 } from 'lucide-react'
+import { LoaderCircle, Play, Share2 } from 'lucide-react'
 import { useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import gfm from 'remark-gfm'
@@ -9,6 +9,7 @@ import rehypeSlug from 'rehype-slug'
 import { toast } from 'react-hot-toast'
 import { getSharedNote, SharedNote } from '@/services/note'
 import { Button } from '@/components/ui/button'
+import ErrorDiagnosticCard from '@/components/ErrorDiagnosticCard'
 import 'github-markdown-css/github-markdown-light.css'
 import 'katex/dist/katex.min.css'
 
@@ -22,19 +23,20 @@ export default function SharePage() {
   const { shareId = '' } = useParams()
   const [note, setNote] = useState<SharedNote | null>(null)
   const [loading, setLoading] = useState(true)
-  const [failed, setFailed] = useState(false)
+  const [failure, setFailure] = useState<unknown>(null)
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     let active = true
     setLoading(true)
-    setFailed(false)
+    setFailure(null)
 
     getSharedNote(shareId)
       .then(data => {
         if (active) setNote(data)
       })
-      .catch(() => {
-        if (active) setFailed(true)
+      .catch(error => {
+        if (active) setFailure(error)
       })
       .finally(() => {
         if (active) setLoading(false)
@@ -43,7 +45,7 @@ export default function SharePage() {
     return () => {
       active = false
     }
-  }, [shareId])
+  }, [shareId, attempt])
 
   const formattedDate = useMemo(() => {
     if (!note?.created_at) return ''
@@ -70,19 +72,14 @@ export default function SharePage() {
     )
   }
 
-  if (failed || !note) {
+  if (failure || !note) {
     return (
-      <main className="fixed inset-0 z-30 flex overflow-y-auto items-center justify-center bg-[#f7f7f4] px-6">
-        <div className="max-w-md text-center">
-          <div className="mx-auto mb-5 flex h-12 w-12 items-center justify-center rounded-2xl bg-neutral-900 text-white">
-            <Link2 className="h-5 w-5" />
-          </div>
-          <h1 className="text-2xl font-semibold text-neutral-900">分享链接不可用</h1>
-          <p className="mt-3 leading-7 text-neutral-500">这篇笔记不存在，或分享链接不完整。</p>
-          <a href="/" className="mt-6 inline-block text-sm font-medium text-pink-600 hover:text-pink-700">
-            返回 BiliNote
-          </a>
-        </div>
+      <main className="fixed inset-0 z-30 flex overflow-y-auto items-center justify-center bg-[radial-gradient(circle_at_top_left,#eff6ff_0,transparent_38%),#f8fafc] px-4 py-10 sm:px-8">
+        <ErrorDiagnosticCard
+          error={failure || { msg: '这篇笔记不存在，或分享链接不完整。', code: 404 }}
+          fallback="分享链接不可用"
+          onRetry={() => setAttempt(value => value + 1)}
+        />
       </main>
     )
   }

@@ -24,7 +24,7 @@ export const shareNote = (data: ShareNotePayload) =>
   request.post<any, ShareNoteResult>('/share_note', data)
 
 export const getSharedNote = (shareId: string) =>
-  request.get<any, SharedNote>(`/shared_note/${encodeURIComponent(shareId)}`)
+  request.get<any, SharedNote>(`/shared_note/${encodeURIComponent(shareId)}`, { suppressToast: true })
 
 export const generateNote = async (data: {
   video_url: string
@@ -67,7 +67,6 @@ export const delete_task = async ({ video_id, platform }) => {
     toast.success('任务已成功删除')
     return res
   } catch (e) {
-    toast.error('请求异常，删除任务失败')
     console.error('删除任务失败:', e)
     throw e
   }

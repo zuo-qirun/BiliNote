@@ -13,14 +13,17 @@ export const metadata = {
 
 const RootLayout: FC<RootLayoutProps> = ({ children }) => {
   return (
-    <div className="min-h-screen bg-neutral-100 font-sans text-neutral-900">
+    <div className="app-shell min-h-screen text-neutral-900">
       <Toaster
-        position="top-center" // 顶部居中显示
+        position="top-right"
+        gutter={10}
         toastOptions={{
           style: {
-            borderRadius: '8px',
-            background: '#333',
+            borderRadius: '14px',
+            background: '#171717',
             color: '#fff',
+            padding: '12px 14px',
+            boxShadow: '0 20px 55px -24px rgba(15, 23, 42, .55)',
           },
         }}
       />

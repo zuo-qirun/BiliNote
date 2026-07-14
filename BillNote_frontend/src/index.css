@@ -7,37 +7,48 @@ html, body, #root {
   overflow: hidden;
 }
 
-/* 修改滚动条轨道颜色 */
+html { color-scheme: light; }
+
+body {
+  font-family: "MiSans", "HarmonyOS Sans SC", "Microsoft YaHei UI", sans-serif;
+  letter-spacing: -0.008em;
+  text-rendering: optimizeLegibility;
+}
+
+.app-shell {
+  background:
+    radial-gradient(circle at 8% -10%, rgba(37, 99, 235, .10), transparent 34%),
+    radial-gradient(circle at 96% 12%, rgba(14, 165, 233, .08), transparent 28%),
+    #f5f7fa;
+}
+
+::selection { background: rgba(37, 99, 235, .18); color: #172554; }
+
 ::-webkit-scrollbar {
-  width: 8px; /* 控制滚动条的宽度 */
+  width: 6px;
+  height: 6px;
 }
-
-/* 修改滚动条的轨道颜色 */
 ::-webkit-scrollbar-track {
-  background-color: #f1f1f1; /* 轨道的背景颜色 */
+  background: transparent;
 }
-
-/* 修改滚动条的滑块颜色 */
 ::-webkit-scrollbar-thumb {
-  background-color: #888; /* 滑块的颜色 */
-  border-radius: 4px; /* 圆角 */
+  background: #cbd5e1;
+  border-radius: 999px;
 }
-
-/* 当鼠标悬停时，修改滑块颜色 */
 ::-webkit-scrollbar-thumb:hover {
-  background-color: #555; /* 悬停时的颜色 */
+  background: #94a3b8;
 }
 
 :root {
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
+  --radius: 0.875rem;
+  --background: #f7f8fa;
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: #3c77fb;
-  --primary-light: #e0eeff;
+  --primary: #2563eb;
+  --primary-light: #e8f0ff;
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
@@ -46,7 +57,7 @@ html, body, #root {
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
-  --border: var(    --color-neutral-200);
+  --border: #e2e8f0;
   --input: oklch(0.922 0 0);
   --ring: #096dd9;
   --chart-1: oklch(0.646 0.222 41.116);
@@ -145,4 +156,28 @@ html, body, #root {
   body {
     @apply bg-background text-foreground;
   }
+
+  button, a, input, textarea, [role="button"] {
+    @apply transition-colors duration-200;
+  }
+}
+
+@layer components {
+  .workspace-panel {
+    @apply border-slate-200/80 bg-white/88 backdrop-blur-xl;
+  }
+  .workspace-header {
+    @apply border-b border-slate-200/70 bg-white/72 backdrop-blur-xl;
+  }
+  .surface-card {
+    @apply rounded-2xl border border-slate-200/80 bg-white shadow-[0_18px_60px_-42px_rgba(15,23,42,.38)];
+  }
+  .diagnostic-toast details[open] {
+    animation: diagnostic-reveal .18s ease-out;
+  }
+}
+
+@keyframes diagnostic-reveal {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: translateY(0); }
 }

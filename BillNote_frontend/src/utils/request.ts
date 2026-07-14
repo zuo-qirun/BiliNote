@@ -1,5 +1,5 @@
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
-import toast from 'react-hot-toast'
+import { normalizeErrorDiagnostic, showErrorDiagnostic } from '@/utils/errorDiagnostics'
 import { getAuthToken } from '@/store/authStore'
 
 // 统一响应类型
@@ -47,7 +47,7 @@ request.interceptors.response.use(
     } else {
       // 业务错误，统一显示后端返回的错误消息（除非调用方显式 suppressToast）
       if (!response.config?.suppressToast) {
-        toast.error(res.msg || '操作失败，请稍后再试');
+        showErrorDiagnostic(res, res.msg || '操作失败，请稍后再试');
       }
       return Promise.reject(res); // 拒绝Promise，让业务代码可以捕获并处理
     }
@@ -58,16 +58,17 @@ request.interceptors.response.use(
     const res = error?.response?.data as IResponse | undefined;
     if (res) {
       // 如果后端有返回错误信息，则显示后端信息
-      if (!suppress) toast.error(res.msg || '服务器错误，请稍后再试');
+      if (!suppress) showErrorDiagnostic(res, res.msg || '服务器错误，请稍后再试');
       return Promise.reject(res);
     } else {
       // 没有响应数据（如网络中断），显示通用网络错误
-      if (!suppress) toast.error('请求失败，请检查网络连接或稍后再试')
-      return Promise.reject({
+      const networkError = {
         code: -1,
         msg: '请求失败，请检查网络连接',
-        data: null
-      } as IResponse);
+        data: { error_detail: normalizeErrorDiagnostic(error, '请求失败，请检查网络连接') }
+      } as IResponse
+      if (!suppress) showErrorDiagnostic(networkError)
+      return Promise.reject(networkError);
     }
   }
 );

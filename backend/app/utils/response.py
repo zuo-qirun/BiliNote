@@ -1,10 +1,6 @@
 from fastapi.responses import JSONResponse
-from app.utils.status_code import StatusCode
-from pydantic import BaseModel
-from typing import Optional, Any
+from app.utils.api_error_diagnosis import diagnose_api_error
 
-
-from fastapi.responses import JSONResponse
 
 class ResponseWrapper:
     @staticmethod
@@ -17,8 +13,11 @@ class ResponseWrapper:
 
     @staticmethod
     def error(msg="error", code=500, data=None):
+        payload = dict(data) if isinstance(data, dict) else {}
+        if "error_detail" not in payload:
+            payload["error_detail"] = diagnose_api_error(msg, code)
         return JSONResponse(content={
             "code": code,
             "msg": str(msg),
-            "data": data
+            "data": payload
         })

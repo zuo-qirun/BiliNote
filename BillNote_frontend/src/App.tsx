@@ -86,7 +86,11 @@ function App() {
       <StartupBanner />
       <BackendHealthIndicator />
       <Router>
-        <Suspense fallback={<div className="flex h-screen items-center justify-center">加载中…</div>}>
+        <Suspense fallback={(
+          <div className="flex h-screen items-center justify-center bg-slate-50">
+            <div className="rounded-2xl border border-slate-200 bg-white px-6 py-4 text-sm font-medium text-slate-600 shadow-xl shadow-slate-900/5">正在加载工作区…</div>
+          </div>
+        )}>
           <Routes>
             <Route path="/onboarding" element={<Onboarding />} />
             <Route path="/share/:shareId" element={<SharePage />} />

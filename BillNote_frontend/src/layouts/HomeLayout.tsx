@@ -68,15 +68,15 @@ const HomeLayout: FC<IProps> = ({ NoteForm, Preview, History }) => {
     ]
 
     return (
-      <div className="flex h-[100dvh] flex-col overflow-hidden bg-neutral-50">
-        <header className="flex h-14 shrink-0 items-center justify-between border-b border-neutral-200 bg-white px-4">
+      <div className="flex h-[100dvh] flex-col overflow-hidden bg-slate-50">
+        <header className="workspace-header flex h-16 shrink-0 items-center justify-between px-4 shadow-[0_8px_30px_-26px_rgba(15,23,42,.5)]">
           <div className="flex items-center gap-2.5">
-            <div className="h-9 w-9 overflow-hidden rounded-xl bg-neutral-50 p-0.5">
+            <div className="h-10 w-10 overflow-hidden rounded-2xl border border-blue-100 bg-blue-50 p-0.5 shadow-sm">
               <img src={logo} alt="BiliNote" className="h-full w-full object-contain" />
             </div>
             <div>
-              <div className="text-lg font-bold leading-none text-neutral-900">BiliNote</div>
-              <div className="mt-1 text-[10px] tracking-wide text-neutral-400">视频笔记工作台</div>
+              <div className="text-lg font-extrabold leading-none tracking-[-0.03em] text-slate-950">BiliNote</div>
+              <div className="mt-1 text-[10px] font-medium tracking-[0.12em] text-slate-400">视频知识工作台</div>
             </div>
           </div>
           <div className="flex items-center gap-1">
@@ -109,7 +109,7 @@ const HomeLayout: FC<IProps> = ({ NoteForm, Preview, History }) => {
         </section>
 
         <nav
-          className="grid shrink-0 grid-cols-3 border-t border-neutral-200 bg-white px-2 pt-1 shadow-[0_-8px_24px_rgba(15,23,42,0.04)]"
+          className="grid shrink-0 grid-cols-3 border-t border-slate-200/80 bg-white/92 px-2 pt-1 shadow-[0_-12px_35px_-28px_rgba(15,23,42,.5)] backdrop-blur-xl"
           style={{ paddingBottom: 'max(0.35rem, env(safe-area-inset-bottom))' }}
           aria-label="手机端主导航"
         >
@@ -137,7 +137,7 @@ const HomeLayout: FC<IProps> = ({ NoteForm, Preview, History }) => {
   }
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden">
+    <div className="flex h-screen flex-col overflow-hidden bg-slate-100/80 p-2">
       <ResizablePanelGroup direction="horizontal" className="h-full w-full">
         {/* 左边表单 */}
         <ResizablePanel
@@ -150,13 +150,13 @@ const HomeLayout: FC<IProps> = ({ NoteForm, Preview, History }) => {
           onCollapse={() => setIsLeftCollapsed(true)}
           onExpand={() => setIsLeftCollapsed(false)}
         >
-          <aside className="flex h-full flex-col overflow-hidden border-r border-neutral-200 bg-white">
-            <header className="flex h-16 items-center justify-between px-6">
+          <aside className="workspace-panel flex h-full flex-col overflow-hidden rounded-l-2xl border shadow-[0_20px_60px_-45px_rgba(15,23,42,.5)]">
+            <header className="workspace-header flex h-18 items-center justify-between px-5">
               <div className="flex items-center gap-2">
-                <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-2xl">
+                <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-2xl border border-blue-100 bg-blue-50 shadow-sm">
                   <img src={logo} alt="logo" className="h-full w-full object-contain" />
                 </div>
-                <div className="text-2xl font-bold text-gray-800">BiliNote</div>
+                <div><div className="text-xl font-extrabold tracking-[-0.035em] text-slate-950">BiliNote</div><div className="text-[10px] font-medium tracking-[.12em] text-slate-400">KNOWLEDGE STUDIO</div></div>
               </div>
               <div className="flex items-center gap-1">
                 <ExtensionDownloadButton compact />
@@ -193,7 +193,7 @@ const HomeLayout: FC<IProps> = ({ NoteForm, Preview, History }) => {
               </div>
             </header>
             <ScrollArea className="flex-1 overflow-auto">
-              <div className="p-4">{NoteForm}</div>
+              <div className="p-4 pb-8">{NoteForm}</div>
             </ScrollArea>
           </aside>
         </ResizablePanel>
@@ -230,9 +230,9 @@ const HomeLayout: FC<IProps> = ({ NoteForm, Preview, History }) => {
           onCollapse={() => setIsMiddleCollapsed(true)}
           onExpand={() => setIsMiddleCollapsed(false)}
         >
-          <aside className="flex h-full flex-col overflow-hidden border-r border-neutral-200 bg-white">
-            <header className="flex h-10 shrink-0 items-center justify-between border-b border-neutral-100 px-3">
-              <span className="text-sm font-medium text-gray-600">生成历史</span>
+          <aside className="workspace-panel flex h-full flex-col overflow-hidden border-y border-slate-200/80">
+            <header className="workspace-header flex h-12 shrink-0 items-center justify-between px-4">
+              <span className="text-xs font-bold uppercase tracking-[.14em] text-slate-500">生成历史</span>
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -278,7 +278,7 @@ const HomeLayout: FC<IProps> = ({ NoteForm, Preview, History }) => {
 
         {/* 右边预览 */}
         <ResizablePanel defaultSize={61} minSize={30}>
-          <main className="flex h-full flex-col overflow-hidden bg-white p-6">{Preview}</main>
+          <main className="flex h-full flex-col overflow-hidden rounded-r-2xl border border-slate-200/80 bg-white p-3 shadow-[0_20px_60px_-45px_rgba(15,23,42,.5)]">{Preview}</main>
         </ResizablePanel>
       </ResizablePanelGroup>
     </div>
