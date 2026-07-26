@@ -16,7 +16,8 @@ note_styles = [
     {'label': '生活向', 'value': 'life_journal'},
     {'label': '任务导向', 'value': 'task_oriented'},
     {'label': '商业风格', 'value': 'business'},
-    {'label': '会议纪要', 'value': 'meeting_minutes'}
+    {'label': '会议纪要', 'value': 'meeting_minutes'},
+    {'label': '文言文', 'value': 'classical_chinese'}
 ]
 
 
@@ -82,7 +83,9 @@ def get_style_format(style):
         'task_oriented': '6. **任务导向**: 强调任务、目标，适合工作和待办事项。',
         'business': '7. **商业风格**: 适合商业报告、会议纪要，正式且精准。',
         'meeting_minutes': '8. **会议纪要**: 适合商业报告、会议纪要，正式且精准。',
-        "tutorial":"9.**教程笔记**:尽可能详细的记录教程,特别是关键点和一些重要的结论步骤"
+        "tutorial":"9.**教程笔记**:尽可能详细的记录教程,特别是关键点和一些重要的结论步骤",
+        'classical_chinese': '''10. **文言文**: 请以雅正、简练的文言文撰写全文，采用古文语序与措辞；
+务必忠实保留原视频的事实、步骤、专有名词、数字和时间信息。遇现代术语、代码、产品名、公式或难以准确转写的内容，保留原文并可在括号内作极简白话说明；不得为求古雅而杜撰、曲解或遗漏关键信息。标题与层级仍使用 Markdown。'''
     }
     return style_map.get(style, '')
 
