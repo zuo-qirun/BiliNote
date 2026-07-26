@@ -20,6 +20,7 @@ from app.enmus.task_status_enums import TaskStatus
 from app.enmus.note_enums import DownloadQuality
 from app.exceptions.note import NoteError
 from app.exceptions.provider import ProviderError
+from app.exceptions.transcription import EmptyTranscriptError
 from app.gpt.base import GPT
 from app.gpt.gpt_factory import GPTFactory
 from app.models.audio_model import AudioDownloadResult
@@ -96,6 +97,7 @@ class NoteGenerator:
         video_understanding: bool = False,
         video_interval: int = 0,
         grid_size: Optional[List[int]] = None,
+        force_video_only: bool = False,
     ) -> NoteResult | None:
         """
         主流程：按步骤依次下载、转写、GPT 总结、截图/链接处理、存库、返回 NoteResult。
@@ -133,11 +135,12 @@ class NoteGenerator:
             audio_cache_file = NOTE_OUTPUT_DIR / f"{task_id}_audio.json"
             transcript_cache_file = NOTE_OUTPUT_DIR / f"{task_id}_transcript.json"
             markdown_cache_file = NOTE_OUTPUT_DIR / f"{task_id}_markdown.md"
-            # 1. 获取字幕/转写：优先缓存 → 平台字幕 → 音频转写
+            # 1. 获取字幕/转写：优先缓存 → 平台字幕 → 音频转写。
+            # 用户确认“本来没有可用语音”后，跳过文字链路，只使用视频画面。
             transcript = None
 
             # 尝试读取缓存
-            if transcript_cache_file.exists():
+            if not force_video_only and transcript_cache_file.exists():
                 logger.info(f"检测到转写缓存 ({transcript_cache_file})，尝试读取")
                 try:
                     data = json.loads(transcript_cache_file.read_text(encoding="utf-8"))
@@ -152,7 +155,7 @@ class NoteGenerator:
                     logger.warning(f"加载转写缓存失败: {e}")
 
             # 缓存没有，尝试获取平台字幕
-            if transcript is None:
+            if not force_video_only and transcript is None:
                 logger.info("尝试获取平台字幕（优先于音频下载）...")
                 try:
                     transcript = downloader.download_subtitles(video_url)
@@ -172,7 +175,7 @@ class NoteGenerator:
             # 2. 下载音频/视频
             # 有字幕时只提取元信息，不下载音视频文件（除非需要截图/视频理解）
             has_transcript = transcript is not None
-            need_full_download = not has_transcript or screenshot or video_understanding
+            need_full_download = force_video_only or not has_transcript or screenshot or video_understanding
             audio_meta = self._download_media(
                 downloader=downloader,
                 video_url=video_url,
@@ -189,7 +192,17 @@ class NoteGenerator:
             )
 
             # 3. 如果前面没拿到字幕，走转写流程
-            if transcript is None:
+            if force_video_only:
+                if not self.video_img_urls:
+                    raise RuntimeError("视频理解未生成可用画面，无法在无转写文本时继续生成笔记")
+                transcript = TranscriptResult(language=None, full_text="", segments=[])
+                video_only_instruction = (
+                    "【视频理解模式】该视频未取得可用字幕或语音转写，用户已确认这是正常情况。"
+                    "请仅依据随请求提供的视频画面和标题生成笔记；不要编造画面中无法确认的对话、数字或情节。"
+                    "若画面信息有限，请明确说明信息来源受限。不要输出 *Content-[mm:ss] 时间标记。"
+                )
+                extras = f"{extras.strip()}\n\n{video_only_instruction}" if extras and extras.strip() else video_only_instruction
+            elif transcript is None:
                 transcript = self._get_transcript(
                     downloader=downloader,
                     video_url=video_url,
@@ -234,6 +247,14 @@ class NoteGenerator:
             logger.info(f"笔记生成成功 (task_id={task_id})")
             return NoteResult(markdown=markdown, transcript=transcript, audio_meta=audio_meta)
 
+        except EmptyTranscriptError as exc:
+            logger.info("转写完成但结果为空，等待用户确认 (task_id=%s): %s", task_id, exc)
+            self._update_status(
+                task_id,
+                TaskStatus.WAITING_TRANSCRIPT_CONFIRMATION,
+                message="未获得可用转写文字。请确认视频是否本来没有可用语音；确认后将使用视频理解继续生成笔记。",
+            )
+            return None
         except Exception as exc:
             logger.error(f"生成笔记流程异常 (task_id={task_id})：{exc}", exc_info=True)
             self._update_status(task_id, TaskStatus.FAILED, message=str(exc))
@@ -463,12 +484,20 @@ class NoteGenerator:
         task_id = audio_cache_file.stem.split("_")[0]
         self._update_status(task_id, status_phase)
 
+        # 即使已经缓存了音频，视频理解仍需要下载视频并提取画面。
+        need_video = screenshot or video_understanding
+        if (screenshot or video_understanding) and not grid_size:
+            grid_size = [3, 3] if video_understanding else [2, 2]
+
+        cached_audio = None
         # 已有缓存，尝试加载
         if audio_cache_file.exists():
             logger.info(f"检测到音频缓存 ({audio_cache_file})，直接读取")
             try:
                 data = json.loads(audio_cache_file.read_text(encoding="utf-8"))
-                return AudioDownloadResult(**data)
+                cached_audio = AudioDownloadResult(**data)
+                if not need_video:
+                    return cached_audio
             except Exception as e:
                 logger.warning(f"读取音频缓存失败，将重新下载：{e}")
 
@@ -491,11 +520,6 @@ class NoteGenerator:
                 return audio
             except Exception as exc:
                 logger.warning(f"元信息提取失败，将尝试完整下载: {exc}")
-
-        # 判断是否需要下载视频
-        need_video = screenshot or video_understanding
-        if screenshot and not grid_size:
-            grid_size = [2, 2]
 
         frame_interval = video_interval if video_interval and video_interval > 0 else 6
         if need_video:
@@ -520,6 +544,9 @@ class NoteGenerator:
                 logger.error(f"视频下载失败：{exc}")
                 self._handle_exception(task_id, exc)
                 raise
+
+        if cached_audio is not None:
+            return cached_audio
 
         # 下载音频
         try:
@@ -634,6 +661,8 @@ class NoteGenerator:
             transcript_cache_file.write_text(json.dumps(asdict(transcript), ensure_ascii=False, indent=2), encoding="utf-8")
             logger.info(f"转写并缓存成功 ({transcript_cache_file})")
             return transcript
+        except EmptyTranscriptError:
+            raise
         except Exception as exc:
             logger.error(f"音频转写失败：{exc}")
             self._handle_exception(resolved_task_id, exc)
@@ -650,8 +679,11 @@ class NoteGenerator:
             result = self.transcriber.transcript(file_path=audio_file)
             full_text = (result.full_text or "").strip() if result else ""
             if not full_text:
-                raise RuntimeError("转写器返回了空结果")
+                raise EmptyTranscriptError("转写器已完成，但未返回可用文字")
             return result
+        except EmptyTranscriptError:
+            # 空结果不是服务故障；交给任务状态机向用户确认，避免继续回退后掩盖原因。
+            raise
         except Exception as primary_error:
             # 平台字幕缺失是正常情况；若 Bcut 返回空文本或上游任务失败，优先用
             # 本地 fast-whisper 兜底，最后才尝试不稳定的快手在线转写。
@@ -687,9 +719,11 @@ class NoteGenerator:
                     result = fallback.transcript(file_path=audio_file)
                     full_text = (result.full_text or "").strip() if result else ""
                     if not full_text:
-                        raise RuntimeError("备用转写器返回了空结果")
+                        raise EmptyTranscriptError("备用转写器已完成，但未返回可用文字")
                     logger.info("备用转写器 %s 转写成功", fallback_type)
                     return result
+                except EmptyTranscriptError:
+                    raise
                 except Exception as fallback_error:
                     logger.warning(
                         "备用转写器 %s 失败: %s",

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, memo, FC } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { Button } from '@/components/ui/button.tsx'
-import { Copy, Download, ArrowRight, Play, ExternalLink } from 'lucide-react'
+import { Copy, Download, ArrowRight, Play, ExternalLink, Eye, MessageSquareWarning } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import Loading from '@/components/Lottie/Loading.tsx'
 import Idle from '@/components/Lottie/Idle.tsx'
@@ -24,7 +24,7 @@ import TranscriptViewer from '@/pages/HomePage/components/transcriptViewer.tsx'
 import MarkmapEditor from '@/pages/HomePage/components/MarkmapComponent.tsx'
 import ChatPanel from '@/pages/HomePage/components/ChatPanel.tsx'
 import VideoBanner from '@/pages/HomePage/components/VideoBanner.tsx'
-import { shareNote } from '@/services/note.ts'
+import { confirmEmptyTranscript, shareNote } from '@/services/note.ts'
 import { TaskErrorPanel } from '@/pages/HomePage/components/TaskErrorPanel'
 
 interface VersionNote {
@@ -37,7 +37,7 @@ interface VersionNote {
 
 interface MarkdownViewerProps {
   content: string | VersionNote[]
-  status: 'idle' | 'loading' | 'success' | 'failed'
+  status: 'idle' | 'loading' | 'confirming' | 'success' | 'failed'
 }
 
 const steps = [
@@ -367,6 +367,8 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
     [renderedContent]
   )
   const retryTask = useTaskStore.getState().retryTask
+  const updateTaskContent = useTaskStore(state => state.updateTaskContent)
+  const [confirmingTranscript, setConfirmingTranscript] = useState(false)
   const isMultiVersion = Array.isArray(currentTask?.markdown)
   const liveDraft = typeof currentTask?.liveMarkdown === 'string' ? currentTask.liveMarkdown : ''
   const [showTranscribe, setShowTranscribe] = useState(false)
@@ -490,6 +492,93 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
     } finally {
       setSharing(false)
     }
+  }
+
+  const handleEmptyTranscriptConfirmation = async (isNormal: boolean) => {
+    if (!currentTask || confirmingTranscript) return
+
+    setConfirmingTranscript(true)
+    try {
+      const response = await confirmEmptyTranscript(currentTask.id, isNormal)
+      const nextStatus = response?.status || (isNormal ? 'PENDING' : 'FAILED')
+      updateTaskContent(currentTask.id, {
+        status: nextStatus,
+        message: isNormal
+          ? '已确认视频无可用语音，正在提取视频画面并使用视频理解生成笔记。'
+          : '已标记为转写异常，请检查视频音轨或稍后重试。',
+      })
+      toast.success(isNormal ? '已开始使用视频理解继续生成' : '已标记为转写异常')
+    } catch (error) {
+      console.error('确认转写结果失败:', error)
+      toast.error('提交确认失败，请稍后再试')
+    } finally {
+      setConfirmingTranscript(false)
+    }
+  }
+
+  if (status === 'confirming') {
+    return (
+      <ScrollArea className="h-full min-h-0 w-full touch-pan-y overscroll-y-contain">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 py-5 sm:px-6 sm:py-8">
+          <section className="overflow-hidden rounded-2xl border border-amber-200 bg-white shadow-[0_18px_55px_-38px_rgba(180,83,9,0.6)]">
+            <div className="relative border-b border-amber-100 bg-[linear-gradient(135deg,#fffaf0_0%,#fff_62%,#fff7df_100%)] px-5 py-5 sm:px-7">
+              <div className="absolute right-0 top-0 h-28 w-28 -translate-y-8 translate-x-8 rounded-full border-[18px] border-amber-100/70" />
+              <div className="relative flex items-start gap-3.5">
+                <div className="mt-0.5 rounded-xl bg-amber-500 p-2.5 text-white shadow-sm">
+                  <MessageSquareWarning className="h-5 w-5" aria-hidden="true" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <span className="rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold tracking-wide text-amber-800">
+                    TRANSCRIPT-EMPTY-CONFIRM
+                  </span>
+                  <h2 className="mt-3 text-xl font-bold tracking-tight text-neutral-950 sm:text-2xl">没有获得可用文字</h2>
+                  <p className="mt-2 max-w-2xl text-sm leading-6 text-neutral-600">
+                    平台没有字幕是正常的，系统已经继续尝试音频转写；但转写已完成且返回为空。请确认这是否符合视频本身的情况。
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-5 p-5 sm:p-6 md:grid-cols-2">
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
+                <h3 className="flex items-center gap-2 text-sm font-bold text-emerald-950">
+                  <Eye className="h-4 w-4 text-emerald-700" /> 视频本来没有有效语音
+                </h3>
+                <p className="mt-2 text-sm leading-6 text-emerald-900/75">
+                  将下载视频帧，使用所选的多模态模型依据画面生成笔记。画面无法确认的内容不会被当作事实。
+                </p>
+                <Button
+                  className="mt-4 w-full bg-emerald-700 text-white hover:bg-emerald-800"
+                  onClick={() => handleEmptyTranscriptConfirmation(true)}
+                  disabled={confirmingTranscript}
+                >
+                  <Eye className="h-4 w-4" /> 用视频理解继续
+                </Button>
+              </div>
+
+              <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-4">
+                <h3 className="text-sm font-bold text-neutral-900">视频应该有语音或字幕</h3>
+                <p className="mt-2 text-sm leading-6 text-neutral-600">
+                  这更可能是音轨、转写服务或源视频暂时异常。系统会保留错误信息，随后可以从失败页重试。
+                </p>
+                <Button
+                  variant="outline"
+                  className="mt-4 w-full"
+                  onClick={() => handleEmptyTranscriptConfirmation(false)}
+                  disabled={confirmingTranscript}
+                >
+                  不是，标记为转写异常
+                </Button>
+              </div>
+            </div>
+          </section>
+
+          <p className="px-1 text-xs leading-5 text-neutral-500">
+            视频理解需要所选模型支持图片输入；若模型不支持多模态，继续后会给出明确错误，便于改用视觉模型重试。
+          </p>
+        </div>
+      </ScrollArea>
+    )
   }
 
   if (status === 'loading') {

@@ -105,6 +105,7 @@ class VideoRequest(BaseModel):
     #   {"language": "zh", "full_text": "...", "segments": [{"start","end","text"}, ...]}
     prefetched_transcript: Optional[dict] = None
 
+
     @field_validator("video_url")
     def validate_supported_url(cls, v):
         url = str(v)
@@ -116,6 +117,10 @@ class VideoRequest(BaseModel):
                                 message=NoteErrorEnum.PLATFORM_NOT_SUPPORTED.message)
 
         return v
+
+
+class EmptyTranscriptConfirmationRequest(BaseModel):
+    is_normal: bool
 
 
 NOTE_OUTPUT_DIR = os.getenv("NOTE_OUTPUT_DIR", "note_results")
@@ -277,10 +282,52 @@ def _persist_prefetched_transcript(task_id: str, transcript: dict) -> None:
     logger.info(f"已写入客户端预取字幕缓存: {target} ({len(cleaned_segments)} 段)")
 
 
+def _task_context_path(task_id: str) -> Path:
+    return Path(NOTE_OUTPUT_DIR) / f"{task_id}.context.json"
+
+
+def _save_task_context(task_id: str, data: VideoRequest) -> None:
+    """Persist only non-sensitive generation parameters needed to resume a paused task."""
+    context = {
+        "video_url": data.video_url,
+        "platform": data.platform,
+        "quality": data.quality.value,
+        "link": bool(data.link),
+        "screenshot": bool(data.screenshot),
+        "model_name": data.model_name,
+        "provider_id": data.provider_id,
+        "format": data.format or [],
+        "style": data.style,
+        "extras": data.extras,
+        "video_understanding": bool(data.video_understanding),
+        "video_interval": data.video_interval or 0,
+        "grid_size": data.grid_size or [],
+    }
+    target = _task_context_path(task_id)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temp = target.with_suffix(".tmp")
+    temp.write_text(json.dumps(context, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp.replace(target)
+
+
+def _load_task_context(task_id: str) -> dict:
+    target = _task_context_path(task_id)
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="未找到该任务的可恢复配置，请重新提交任务")
+    try:
+        context = json.loads(target.read_text(encoding="utf-8"))
+        required = ("video_url", "platform", "quality", "model_name", "provider_id")
+        if not all(context.get(key) for key in required):
+            raise ValueError("任务配置不完整")
+        return context
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="任务配置已损坏，请重新提交任务") from exc
+
+
 def run_note_task(task_id: str, video_url: str, platform: str, quality: DownloadQuality,
                   link: bool = False, screenshot: bool = False, model_name: str = None, provider_id: str = None,
                   _format: list = None, style: str = None, extras: str = None, video_understanding: bool = False,
-                  video_interval=0, grid_size=[]
+                  video_interval=0, grid_size=None, force_video_only: bool = False,
                   ):
 
     if not model_name or not provider_id:
@@ -302,6 +349,7 @@ def run_note_task(task_id: str, video_url: str, platform: str, quality: Download
             video_understanding=video_understanding,
             video_interval=video_interval,
             grid_size=grid_size,
+            force_video_only=force_video_only,
         )
 
     logger.info(f"任务进入执行队列 (task_id={task_id})")
@@ -431,6 +479,7 @@ def generate_note(
 
         # 统一先写入 PENDING，表示已进入队列等待串行执行
         NoteGenerator()._update_status(task_id, TaskStatus.PENDING)
+        _save_task_context(task_id, data)
 
         # 客户端已经抓好字幕的话，写到转写缓存文件，NoteGenerator 的 cache-hit 逻辑会直接用上
         if data.prefetched_transcript:
@@ -447,6 +496,59 @@ def generate_note(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/task_confirm_empty_transcript/{task_id}")
+def confirm_empty_transcript(
+    task_id: str,
+    data: EmptyTranscriptConfirmationRequest,
+    background_tasks: BackgroundTasks,
+):
+    status_path = Path(NOTE_OUTPUT_DIR) / f"{task_id}.status.json"
+    if not status_path.exists():
+        raise HTTPException(status_code=404, detail="未找到该任务")
+
+    try:
+        status_content = json.loads(status_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail="任务状态无法读取") from exc
+
+    if status_content.get("status") != TaskStatus.WAITING_TRANSCRIPT_CONFIRMATION.value:
+        raise HTTPException(status_code=409, detail="该任务当前不需要确认转写结果")
+
+    if not data.is_normal:
+        NoteGenerator()._update_status(
+            task_id,
+            TaskStatus.FAILED,
+            message="用户确认该视频应有可用语音，但转写结果为空。请检查视频音轨或稍后重试。",
+        )
+        return R.success({"task_id": task_id, "status": TaskStatus.FAILED.value})
+
+    context = _load_task_context(task_id)
+    NoteGenerator()._update_status(
+        task_id,
+        TaskStatus.PENDING,
+        message="已确认视频无可用语音，正在提取视频画面并使用视频理解生成笔记。",
+    )
+    background_tasks.add_task(
+        run_note_task,
+        task_id,
+        context["video_url"],
+        context["platform"],
+        DownloadQuality(context["quality"]),
+        context.get("link", False),
+        context.get("screenshot", False),
+        context["model_name"],
+        context["provider_id"],
+        context.get("format", []),
+        context.get("style"),
+        context.get("extras"),
+        True,
+        context.get("video_interval", 0),
+        context.get("grid_size") or [3, 3],
+        True,
+    )
+    return R.success({"task_id": task_id, "status": TaskStatus.PENDING.value})
 
 
 @router.get("/task_status/{task_id}")

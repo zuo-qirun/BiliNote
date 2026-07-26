@@ -7,6 +7,7 @@ import requests
 
 from app.decorators.timeit import timeit
 from app.models.transcriber_model import TranscriptSegment, TranscriptResult
+from app.exceptions.transcription import EmptyTranscriptError
 from app.transcriber.base import Transcriber
 from app.utils.logger import get_logger
 from events import transcription_finished
@@ -296,7 +297,7 @@ class BcutTranscriber(Transcriber):
                 ))
 
             if not full_text.strip():
-                raise RuntimeError(
+                raise EmptyTranscriptError(
                     "B站ASR任务已完成，但未返回可用文字；"
                     "这通常是源音频无语音、静音或上游识别结果为空"
                 )

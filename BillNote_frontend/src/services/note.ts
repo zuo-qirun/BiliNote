@@ -80,3 +80,8 @@ export const get_task_status = async (task_id: string) => {
     throw e
   }
 }
+
+export const confirmEmptyTranscript = (taskId: string, isNormal: boolean) =>
+  request.post(`/task_confirm_empty_transcript/${encodeURIComponent(taskId)}`, {
+    is_normal: isNormal,
+  })

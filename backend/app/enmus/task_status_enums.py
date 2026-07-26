@@ -6,6 +6,7 @@ class TaskStatus(str, enum.Enum):
     PARSING = "PARSING"
     DOWNLOADING = "DOWNLOADING"
     TRANSCRIBING = "TRANSCRIBING"
+    WAITING_TRANSCRIPT_CONFIRMATION = "WAITING_TRANSCRIPT_CONFIRMATION"
     SUMMARIZING = "SUMMARIZING"
     FORMATTING = "FORMATTING"
     SAVING = "SAVING"
@@ -19,6 +20,7 @@ class TaskStatus(str, enum.Enum):
             cls.PARSING: "解析链接",
             cls.DOWNLOADING: "下载中",
             cls.TRANSCRIBING: "转录中",
+            cls.WAITING_TRANSCRIPT_CONFIRMATION: "等待确认转写结果",
             cls.SUMMARIZING: "总结中",
             cls.FORMATTING: "格式化中",
             cls.SAVING: "保存中",
