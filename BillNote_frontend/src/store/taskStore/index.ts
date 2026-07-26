@@ -216,6 +216,18 @@ export const useTaskStore = create<TaskStore>()(
         const task = get().tasks.find(item => item.id === id)
         if (!task) return
 
+        if (
+          task.status === 'WAITING_TRANSCRIPT_CONFIRMATION' ||
+          ['PENDING', 'PARSING', 'DOWNLOADING', 'TRANSCRIBING', 'SUMMARIZING', 'FORMATTING', 'SAVING'].includes(task.status)
+        ) {
+          toast.info(
+            task.status === 'WAITING_TRANSCRIPT_CONFIRMATION'
+              ? '请先确认转写结果，避免重复生成'
+              : '该笔记正在生成中，请勿重复提交',
+          )
+          return
+        }
+
         const newFormData = payload || task.formData
         try {
           await generateNote({

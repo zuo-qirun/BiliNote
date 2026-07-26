@@ -267,6 +267,18 @@ const NoteForm = () => {
       task_id: currentTaskId || '',
     }
     if (currentTaskId) {
+      const currentTask = getCurrentTask()
+      if (
+        currentTask?.status === 'WAITING_TRANSCRIPT_CONFIRMATION' ||
+        ['PENDING', 'PARSING', 'DOWNLOADING', 'TRANSCRIBING', 'SUMMARIZING', 'FORMATTING', 'SAVING'].includes(currentTask?.status || '')
+      ) {
+        toast.info(
+          currentTask.status === 'WAITING_TRANSCRIPT_CONFIRMATION'
+            ? '请先确认转写结果，避免重复生成'
+            : '该笔记正在生成中，请勿重复提交',
+        )
+        return
+      }
       retryTask(currentTaskId, payload)
       return
     }

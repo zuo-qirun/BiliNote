@@ -6,6 +6,7 @@ import os
 import re
 import secrets
 import sqlite3
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -132,6 +133,31 @@ UPLOAD_MAX_BYTES = int(os.getenv("UPLOAD_MAX_BYTES", str(10 * 1024 * 1024 * 1024
 ALLOWED_VIDEO_SUFFIXES = {
     ".mp4", ".mkv", ".mov", ".avi", ".webm", ".flv", ".m4v", ".mpeg", ".mpg", ".ts",
 }
+
+# Avoid queuing the same task when a browser retries a slow request or a user
+# clicks retry/confirm more than once.  The persisted status file is the
+# source of truth across requests and process restarts.
+_TASK_ENQUEUE_LOCK = threading.Lock()
+_ACTIVE_TASK_STATUSES = frozenset({
+    TaskStatus.PENDING.value,
+    TaskStatus.PARSING.value,
+    TaskStatus.DOWNLOADING.value,
+    TaskStatus.TRANSCRIBING.value,
+    TaskStatus.SUMMARIZING.value,
+    TaskStatus.FORMATTING.value,
+    TaskStatus.SAVING.value,
+})
+
+
+def _read_task_status(task_id: str) -> Optional[str]:
+    status_path = Path(NOTE_OUTPUT_DIR) / f"{task_id}.status.json"
+    if not status_path.exists():
+        return None
+    try:
+        return json.loads(status_path.read_text(encoding="utf-8")).get("status")
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("Unable to read task status while checking duplicate task %s: %s", task_id, exc)
+        return None
 
 
 def _account_db():
@@ -439,6 +465,7 @@ def generate_note(
     background_tasks: BackgroundTasks,
     authorization: Optional[str] = Header(default=None),
 ):
+    reserved_task_id: Optional[str] = None
     try:
         # 就绪门禁：本地转写引擎（fast-whisper / mlx-whisper）必须等模型下载完才能跑视频，
         # 否则任务会卡在首次下载（慢 / OOM / 截断），用户只看到一个静默失败的任务。
@@ -458,6 +485,23 @@ def generate_note(
                         "downloading": readiness["downloading"],
                     },
                 )
+
+        # Reserve an existing task id before consuming quota.  A repeated POST
+        # used to create another worker every time and also spent the quota
+        # again.  Persisting PENDING inside the lock makes later requests see
+        # the reservation immediately.
+        if data.task_id:
+            with _TASK_ENQUEUE_LOCK:
+                existing_status = _read_task_status(data.task_id)
+                if existing_status in _ACTIVE_TASK_STATUSES or existing_status == TaskStatus.WAITING_TRANSCRIPT_CONFIRMATION.value:
+                    logger.info("Ignoring duplicate generate request for task_id=%s status=%s", data.task_id, existing_status)
+                    return R.success({
+                        "task_id": data.task_id,
+                        "status": existing_status,
+                        "already_queued": True,
+                    })
+                NoteGenerator()._update_status(data.task_id, TaskStatus.PENDING)
+                reserved_task_id = data.task_id
 
         quota = consume_generation_quota(request, authorization)
         video_id = extract_video_id(data.video_url, data.platform)
@@ -493,8 +537,20 @@ def generate_note(
                                   data.extras, data.video_understanding, data.video_interval, data.grid_size)
         return R.success({"task_id": task_id, "quota": quota})
     except HTTPException:
+        if reserved_task_id:
+            NoteGenerator()._update_status(
+                reserved_task_id,
+                TaskStatus.FAILED,
+                message="Task could not be requeued; please retry after resolving the request error.",
+            )
         raise
     except Exception as e:
+        if reserved_task_id:
+            NoteGenerator()._update_status(
+                reserved_task_id,
+                TaskStatus.FAILED,
+                message="Task could not be requeued due to a request error; please retry.",
+            )
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -513,7 +569,11 @@ def confirm_empty_transcript(
     except (OSError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=400, detail="任务状态无法读取") from exc
 
-    if status_content.get("status") != TaskStatus.WAITING_TRANSCRIPT_CONFIRMATION.value:
+    current_status = status_content.get("status")
+    if current_status in _ACTIVE_TASK_STATUSES:
+        logger.info("Ignoring duplicate empty-transcript confirmation for task_id=%s", task_id)
+        return R.success({"task_id": task_id, "status": current_status, "already_queued": True})
+    if current_status != TaskStatus.WAITING_TRANSCRIPT_CONFIRMATION.value:
         raise HTTPException(status_code=409, detail="该任务当前不需要确认转写结果")
 
     if not data.is_normal:
@@ -525,6 +585,17 @@ def confirm_empty_transcript(
         return R.success({"task_id": task_id, "status": TaskStatus.FAILED.value})
 
     context = _load_task_context(task_id)
+    # Reserve the task before scheduling video understanding so that a
+    # double-click or automatic HTTP retry cannot enqueue another worker.
+    with _TASK_ENQUEUE_LOCK:
+        current_status = _read_task_status(task_id)
+        if current_status in _ACTIVE_TASK_STATUSES:
+            logger.info("Ignoring duplicate empty-transcript confirmation for task_id=%s", task_id)
+            return R.success({"task_id": task_id, "status": current_status, "already_queued": True})
+        if current_status != TaskStatus.WAITING_TRANSCRIPT_CONFIRMATION.value:
+            raise HTTPException(status_code=409, detail="Task no longer awaits transcript confirmation")
+        NoteGenerator()._update_status(task_id, TaskStatus.PENDING)
+
     NoteGenerator()._update_status(
         task_id,
         TaskStatus.PENDING,
