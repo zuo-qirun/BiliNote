@@ -120,7 +120,7 @@ export interface CloudTask {
 export type NoteStyle =
   | 'minimal' | 'detailed' | 'academic' | 'tutorial'
   | 'xiaohongshu' | 'life_journal' | 'task_oriented'
-  | 'business' | 'meeting_minutes'
+  | 'business' | 'meeting_minutes' | 'meme_generator'
 
 // 与 backend/app/gpt/prompt_builder.py note_formats 一一对齐
 export type NoteFormat = 'toc' | 'link' | 'screenshot' | 'summary'
@@ -135,6 +135,7 @@ export const NOTE_STYLES: Array<{ value: NoteStyle, label: string }> = [
   { value: 'task_oriented', label: '任务导向' },
   { value: 'business', label: '商业风格' },
   { value: 'meeting_minutes', label: '会议纪要' },
+  { value: 'meme_generator', label: '热梗生成器' },
 ]
 
 export const NOTE_FORMATS: Array<{ value: NoteFormat, label: string }> = [

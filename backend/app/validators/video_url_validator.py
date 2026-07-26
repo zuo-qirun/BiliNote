@@ -3,7 +3,6 @@ import re
 from urllib.parse import urlparse
 
 SUPPORTED_PLATFORMS = {
-    "bilibili": r"(https?://)?(www\.)?bilibili\.com/video/[a-zA-Z0-9]+",
     "youtube": r"(https?://)?(www\.)?(youtube\.com/(watch\?v=|shorts/)|youtu\.be/)[\w\-]+",
     "douyin": "douyin",
     "kuaishou": "kuaishou"
@@ -12,9 +11,17 @@ SUPPORTED_PLATFORMS = {
 
 def is_supported_video_url(url: str) -> bool:
     parsed = urlparse(url)
+    hostname = (parsed.hostname or "").lower()
 
     # 检查是否为Bilibili的短链接
-    if parsed.netloc == "b23.tv":
+    if hostname in {"b23.tv", "www.b23.tv"}:
+        return True
+
+    # 兼容 www、m 等 B 站子域，且与浏览器扩展的识别规则保持一致。
+    if (
+        (hostname == "bilibili.com" or hostname.endswith(".bilibili.com"))
+        and re.match(r"^/video/(?:BV[0-9A-Za-z]+|av\d+)", parsed.path, re.IGNORECASE)
+    ):
         return True
 
     for name, pattern in SUPPORTED_PLATFORMS.items():

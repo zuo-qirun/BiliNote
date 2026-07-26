@@ -3,9 +3,27 @@ import App from './views/App.vue'
 import { setupApp } from '~/logic/common-setup'
 import { detectPlatform } from '~/logic/platform'
 
-// 只在支持的视频平台上挂悬浮按钮，避免污染其他网站
-(() => {
-  if (!detectPlatform(window.location.href))
+// B 站是 SPA：从首页/搜索页点进视频时，document 不会重载。需要在 URL 变化后
+// 重新挂载或卸载悬浮按钮，避免视频页未识别、非视频页残留按钮。
+let mountedUrl = ''
+let mountedContainer: HTMLElement | null = null
+let mountedApp: ReturnType<typeof createApp> | null = null
+
+function unmount() {
+  mountedApp?.unmount()
+  mountedContainer?.remove()
+  mountedApp = null
+  mountedContainer = null
+  mountedUrl = ''
+}
+
+function refresh() {
+  const currentUrl = window.location.href
+  if (currentUrl === mountedUrl)
+    return
+
+  unmount()
+  if (!detectPlatform(currentUrl) || !document.body)
     return
 
   const container = document.createElement('div')
@@ -21,4 +39,24 @@ import { detectPlatform } from '~/logic/platform'
   const app = createApp(App)
   setupApp(app)
   app.mount(root)
-})()
+  mountedContainer = container
+  mountedApp = app
+  mountedUrl = currentUrl
+}
+
+function notifyUrlChange() {
+  window.dispatchEvent(new Event('bilinote:urlchange'))
+}
+
+for (const method of ['pushState', 'replaceState'] as const) {
+  const original = history[method]
+  history[method] = function (...args) {
+    const result = original.apply(this, args)
+    notifyUrlChange()
+    return result
+  }
+}
+
+window.addEventListener('popstate', notifyUrlChange)
+window.addEventListener('bilinote:urlchange', refresh)
+refresh()
