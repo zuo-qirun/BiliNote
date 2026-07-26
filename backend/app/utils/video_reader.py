@@ -3,6 +3,7 @@ import hashlib
 import os
 import re
 import subprocess
+from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import ffmpeg
 from PIL import Image, ImageDraw, ImageFont
@@ -20,6 +21,7 @@ class VideoReader:
                  unit_width=960,
                  unit_height=540,
                  save_quality=90,
+                 max_encoded_image_bytes=120 * 1024,
                  font_path="fonts/arial.ttf",
                  frame_dir=None,
                  grid_dir=None):
@@ -30,6 +32,9 @@ class VideoReader:
         self.unit_width = unit_width
         self.unit_height = unit_height
         self.save_quality = save_quality
+        # Base64 expands JPEG bytes by about one third. Keep each image below
+        # 120 KiB so a multimodal request fits the default 256 KiB budget.
+        self.max_encoded_image_bytes = max(32 * 1024, int(max_encoded_image_bytes))
         self.frame_dir = frame_dir or get_app_dir("output_frames")
         self.grid_dir = grid_dir or get_app_dir("grid_output")
         print(f"视频路径：{video_path}",self.frame_dir,self.grid_dir)
@@ -136,12 +141,42 @@ class VideoReader:
         grid_img.save(save_path, quality=self.save_quality)
         return save_path
 
+    def _encode_image_to_base64(self, path: str) -> str:
+        """Encode a grid image within the request budget without dropping it."""
+        with Image.open(path) as source:
+            image = source.convert("RGB")
+
+        quality = min(max(int(self.save_quality), 30), 92)
+        while True:
+            buffer = BytesIO()
+            image.save(buffer, format="JPEG", quality=quality, optimize=True)
+            payload = buffer.getvalue()
+            if len(payload) <= self.max_encoded_image_bytes:
+                encoded = base64.b64encode(payload).decode("utf-8")
+                return f"data:image/jpeg;base64,{encoded}"
+
+            # First lower JPEG quality, then downscale. Both preserve the time
+            # labels while preventing one large collage from invalidating the
+            # entire video-understanding request.
+            if quality > 38:
+                quality = max(38, quality - 12)
+                continue
+
+            width, height = image.size
+            if min(width, height) <= 360:
+                raise ValueError(
+                    f"视频理解网格图压缩后仍超过 {self.max_encoded_image_bytes // 1024} KiB"
+                )
+            image = image.resize(
+                (max(360, int(width * 0.75)), max(202, int(height * 0.75))),
+                Image.Resampling.LANCZOS,
+            )
+            quality = min(max(int(self.save_quality), 30), 72)
+
     def encode_images_to_base64(self, image_paths: list[str]) -> list[str]:
         base64_images = []
         for path in image_paths:
-            with open(path, "rb") as img_file:
-                encoded_string = base64.b64encode(img_file.read()).decode("utf-8")
-                base64_images.append(f"data:image/jpeg;base64,{encoded_string}")
+            base64_images.append(self._encode_image_to_base64(path))
         return base64_images
 
     def run(self)->list[str]:

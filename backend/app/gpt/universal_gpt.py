@@ -377,16 +377,15 @@ class UniversalGPT(GPT):
                 style=source.style,
                 extras=source.extras
             )
-        except ValueError:
-            chunks = chunker.chunk(
-                source.segment,
-                [],
-                title=source.title,
-                tags=source.tags,
-                _format=source._format,
-                style=source.style,
-                extras=source.extras
-            )
+        except ValueError as exc:
+            if source.video_img_urls:
+                raise ValueError(
+                    f"视频理解图片无法装入模型请求：{exc}"
+                ) from exc
+            raise
+
+        if not chunks:
+            raise ValueError("没有可供 AI 总结的转写文字或视频画面")
 
         partials = []
         if checkpoint_key and source_signature:
@@ -433,6 +432,9 @@ class UniversalGPT(GPT):
             if on_partial and partials[0]:
                 on_partial(partials[0])
             return partials[0]
+        if not partials:
+            raise RuntimeError("AI 未返回任何笔记内容")
+
         merged = self._merge_partials(partials, checkpoint_key, source_signature)
         if checkpoint_key:
             self._clear_checkpoint(checkpoint_key)
