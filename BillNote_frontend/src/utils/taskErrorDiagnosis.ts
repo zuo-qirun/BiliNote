@@ -28,6 +28,33 @@ export function diagnoseTaskError(task: Task): TaskErrorDetail {
     }
   }
 
+  if (
+    normalized.includes('转写器')
+    || normalized.includes('b站asr')
+    || normalized.includes('快手asr')
+    || normalized.includes('备用转写器')
+    || normalized.includes('fast-whisper')
+  ) {
+    return {
+      code: 'TRANSCRIBER-ALL-FAILED',
+      title: '音频转写未能完成',
+      summary: '视频没有字幕属于正常情况；本次是在自动回退到音频转写后，所有可用转写器均未得到有效文本。',
+      stage: 'transcribing',
+      retryable: true,
+      possible_causes: [
+        '视频源未提供字幕，系统已正常改走音频转写',
+        'Bcut 返回空文本或上游转写任务暂时失败',
+        '备用转写服务不可用，或本地 Whisper 模型尚未下载完成',
+      ],
+      suggestions: [
+        '稍后重试，外部转写服务可能会恢复',
+        '管理员可在转写设置确认 fast-whisper 模型已下载',
+        '若音频本身无对白、静音或背景声过强，建议换用带字幕的视频源',
+      ],
+      technical_message: technicalMessage,
+    }
+  }
+
   return {
     code: 'TASK_EXECUTION_FAILED',
     title: '任务执行失败',

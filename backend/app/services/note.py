@@ -584,7 +584,7 @@ class NoteGenerator:
                 )
                 return transcript
             else:
-                logger.info("平台无可用字幕，将使用音频转写")
+                logger.info("平台无可用字幕（正常），将使用音频转写")
         except Exception as e:
             logger.warning(f"获取平台字幕失败: {e}，将使用音频转写")
 
@@ -593,6 +593,8 @@ class NoteGenerator:
             audio_file=audio_file,
             transcript_cache_file=transcript_cache_file,
             status_phase=status_phase,
+            task_id=task_id,
+            status_message="未检测到平台字幕，正在使用音频转写（正常）",
         )
 
     def _transcribe_audio(
@@ -600,6 +602,8 @@ class NoteGenerator:
         audio_file: str,
         transcript_cache_file: Path,
         status_phase: TaskStatus,
+        task_id: Optional[str] = None,
+        status_message: Optional[str] = None,
     ) -> TranscriptResult | None:
         """
         1. 检查转写缓存；若存在则尝试加载，否则调用转写器生成并缓存。
@@ -610,8 +614,8 @@ class NoteGenerator:
         :param status_phase: 对应的状态枚举，如 TaskStatus.TRANSCRIBING
         :return: TranscriptResult 对象
         """
-        task_id = transcript_cache_file.stem.split("_")[0]
-        self._update_status(task_id, status_phase)
+        resolved_task_id = task_id or transcript_cache_file.stem.split("_")[0]
+        self._update_status(resolved_task_id, status_phase, message=status_message)
 
         # 已有缓存，尝试加载
         if transcript_cache_file.exists():
@@ -632,13 +636,13 @@ class NoteGenerator:
             return transcript
         except Exception as exc:
             logger.error(f"音频转写失败：{exc}")
-            self._handle_exception(task_id, exc)
+            self._handle_exception(resolved_task_id, exc)
             raise
 
     def _transcribe_with_fallback(self, audio_file: str) -> TranscriptResult:
         """使用主转写器，失败时按配置尝试备用转写器。
 
-        默认只为 bcut 启用 kuaishou 回退。可以用
+        默认会为 bcut 依次启用 fast-whisper 与 kuaishou 回退。可以用
         TRANSCRIBER_FALLBACKS=kuaishou,fast-whisper 调整顺序；空值表示禁用。
         回退仅作用于当前任务，不修改管理员选择的全局转写配置。
         """
@@ -649,7 +653,9 @@ class NoteGenerator:
                 raise RuntimeError("转写器返回了空结果")
             return result
         except Exception as primary_error:
-            default_fallbacks = "kuaishou" if self.transcriber_type == "bcut" else ""
+            # 平台字幕缺失是正常情况；若 Bcut 返回空文本或上游任务失败，优先用
+            # 本地 fast-whisper 兜底，最后才尝试不稳定的快手在线转写。
+            default_fallbacks = "fast-whisper,kuaishou" if self.transcriber_type == "bcut" else ""
             configured = os.getenv(
                 "TRANSCRIBER_FALLBACKS",
                 default_fallbacks,

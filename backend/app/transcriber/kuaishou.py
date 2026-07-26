@@ -45,7 +45,10 @@ class KuaishouTranscriber(Transcriber):
             print('result',result)
             # 检查快手API返回是否包含错误
             if "data" not in result or result.get("code", 0) != 0:
-                error_msg = f"快手API返回错误: {result.get('message', '未知错误')}"
+                error_msg = (
+                    f"快手API返回错误: {result.get('message', '未知错误')}"
+                    f" (code={result.get('code', 'missing')})"
+                )
                 logger.error(error_msg)
                 raise Exception(error_msg)
                 

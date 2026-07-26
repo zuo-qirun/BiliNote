@@ -294,6 +294,12 @@ class BcutTranscriber(Transcriber):
                     end=end_time,
                     text=text
                 ))
+
+            if not full_text.strip():
+                raise RuntimeError(
+                    "B站ASR任务已完成，但未返回可用文字；"
+                    "这通常是源音频无语音、静音或上游识别结果为空"
+                )
             
             # 创建结果对象
             result = TranscriptResult(
